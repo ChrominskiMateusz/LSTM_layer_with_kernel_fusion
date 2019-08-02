@@ -1,2 +1,6 @@
 # compiled files
 *.so
+
+
+# Visual Studio Code temp files
+*.vscode

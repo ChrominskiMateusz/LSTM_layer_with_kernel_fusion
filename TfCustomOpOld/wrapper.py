@@ -31,8 +31,8 @@ from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.platform import resource_loader
 
 _lstm_ops_so = load_library.load_op_library(
-    resource_loader.get_path_to_datafile("_lstm_ops.so"))
-assert _lstm_ops_so, "Could not load _lstm_ops.so."
+    resource_loader.get_path_to_datafile("kernles.so"))
+assert _lstm_ops_so, "Could not load kernels.so."
 
 
 # pylint: disable=invalid-name
