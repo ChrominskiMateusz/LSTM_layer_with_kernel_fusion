@@ -1,3 +1,6 @@
+# Based on:
+# https://jasdeep06.github.io/posts/Understanding-LSTM-in-Tensorflow-MNIST/
+
 import tensorflow as tf
 
 import wrapper as wrap
