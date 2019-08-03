@@ -2,6 +2,8 @@
 #include "tensorflow/core/framework/shape_inference.h"
 #include "tensorflow/core/framework/op_kernel.h"
 
+#include <iostream>
+
 using namespace tensorflow;
 
 REGISTER_OP ("ZeroOut")
@@ -12,13 +14,14 @@ REGISTER_OP ("ZeroOut")
 	return Status::OK ();
 });
 
-REGISTER_KERNEL_BUILDER (Name ("ZeroOut").Device (DEVICE_CPU), ZeroOutOp);
-
 class ZeroOutOp : public OpKernel {
 public:
 	explicit ZeroOutOp (OpKernelConstruction* context) : OpKernel (context) {}
 
 	void Compute (OpKernelContext* context) override {
+
+        std::cout << "No elo kurwy\n";
+		
 		// Grab the input tensor
 		const Tensor& input_tensor = context->input (0);
 		auto input = input_tensor.flat<int32> ();
@@ -39,4 +42,7 @@ public:
 		if (N > 0) output_flat (0) = input (0);
 	}
 };
+
+
+REGISTER_KERNEL_BUILDER (Name ("ZeroOut").Device (DEVICE_CPU), ZeroOutOp);
 
