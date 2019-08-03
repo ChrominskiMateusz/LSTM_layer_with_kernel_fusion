@@ -1,7 +1,9 @@
 # compiled files
 *.so
 
-
 # Visual Studio Code temp files
 *.vscode
 *.code-workspace
+
+# Python temp files
+__pycache__
