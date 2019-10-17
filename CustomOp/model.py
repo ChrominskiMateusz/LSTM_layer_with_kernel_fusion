@@ -1,6 +1,9 @@
 # Based on:
 # https://jasdeep06.github.io/posts/Understanding-LSTM-in-Tensorflow-MNIST/
 
+# http://chrisschell.de/2017/07/10/do_it_yourself_lstm_with_tensorflow.html
+
+import time as time
 import tensorflow as tf
 
 import wrapper as wrap
@@ -35,7 +38,7 @@ x=tf.compat.v1.placeholder("float",[None,time_steps,n_input])
 y=tf.compat.v1.placeholder("float",[None,n_classes])
 
 #processing the input tensor from [batch_size,n_steps,n_input] to "time_steps" number of [batch_size,n_input] tensors
-input=tf.unstack(x ,time_steps,1)
+input=tf.unstack(x, time_steps, 1)
 
 #defining the network
 #lstm_layer = rnn.LSTMBlockCell(num_units,forget_bias=1)
@@ -60,15 +63,19 @@ init=tf.compat.v1.global_variables_initializer()
 
 with tf.compat.v1.Session() as sess:
     sess.run(init)
+
+    start_time = time.time()
     iter=1
-    while iter<100000:
+
+    while iter<10000:
+
         batch_x,batch_y=mnist.train.next_batch(batch_size=batch_size)
 
         batch_x=batch_x.reshape((batch_size,time_steps,n_input))
 
-        sess.run(opt, feed_dict={x: batch_x, y: batch_y})
+        values = sess.run(opt, feed_dict={x: batch_x, y: batch_y})
 
-        if iter %10==0:
+        if iter % 10 == 0:
             acc=sess.run(accuracy,feed_dict={x:batch_x,y:batch_y})
             los=sess.run(loss,feed_dict={x:batch_x,y:batch_y})
             print("For iter ",iter)
@@ -77,3 +84,6 @@ with tf.compat.v1.Session() as sess:
             print("__________________")
 
         iter=iter+1
+    
+    duration = time.time() - start_time
+    print(duration)

@@ -1,6 +1,10 @@
 # compiled files
 *.so
 
+# logs
+*.bin
+*.log
+
 # Visual Studio Code temp files
 *.vscode
 *.code-workspace

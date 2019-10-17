@@ -36,58 +36,44 @@ struct TensorCuBlasGemm {
                   const T* b, int ldb, float beta, T* c, int ldc);
 };
 
-template <typename T>
-struct gemm_compute_type {
-  typedef T type;
-};
-
-template <>
-struct gemm_compute_type<Eigen::half> {
-  typedef float type;
-};
-
 template <typename Device, typename T, bool USE_CUBLAS>
 struct TensorBlasGemm;
 
 template <typename Device, typename T>
 struct TensorBlasGemm<Device, T, true /* USE_CUBLAS */> {
-  static void compute(OpKernelContext* ctx, const Device& d, bool transa,
-                      bool transb, typename gemm_compute_type<T>::type alpha,
+  static void compute(OpKernelContext* ctx, 
+                      const Device& d, 
+                      bool transa,
+                      bool transb,
                       typename TTypes<T>::ConstMatrix a,
                       typename TTypes<T>::ConstMatrix b,
-                      typename gemm_compute_type<T>::type beta,
                       typename TTypes<T>::Matrix c) {
+                        
     int64 m = c.dimensions()[0];
     int64 n = c.dimensions()[1];
     int64 k = transa ? a.dimensions()[0] : a.dimensions()[1];
 
-    TensorCuBlasGemm<T>()(ctx, transb, transa, n, m, k, alpha, b.data(),
-                          transb ? k : n, a.data(), transa ? m : k, beta,
+    TensorCuBlasGemm<T>()(ctx, transb, transa, n, m, k, b.data(),
+                          transb ? k : n, a.data(), transa ? m : k,
                           c.data(), n);
   }
 };
 
 template <typename Device, typename T>
 struct TensorBlasGemm<Device, T, false /* USE_CUBLAS */> {
-  static void compute(OpKernelContext* ctx, const Device& d, bool transa,
-                      bool transb, typename gemm_compute_type<T>::type alpha,
+  static void compute(OpKernelContext* ctx, 
+                      const Device& d, 
+                      bool transa,
+                      bool transb,
                       typename TTypes<T>::ConstMatrix a,
                       typename TTypes<T>::ConstMatrix b,
-                      typename gemm_compute_type<T>::type beta,
                       typename TTypes<T>::Matrix c) {
+
     Eigen::array<Eigen::IndexPair<Eigen::DenseIndex>, 1> contract_pairs;
-    contract_pairs[0] =
-        Eigen::IndexPair<Eigen::DenseIndex>(transa == false, transb == true);
-    if (alpha == typename gemm_compute_type<T>::type(1.f) &&
-        beta == typename gemm_compute_type<T>::type(0.f)) {
-      c.device(d) = a.contract(b, contract_pairs);
-    } else if (alpha == typename gemm_compute_type<T>::type(1.f) &&
-               beta == typename gemm_compute_type<T>::type(1.f)) {
-      c.device(d) += a.contract(b, contract_pairs);
-    } else {
-      c.device(d) = c.constant(T(alpha)) * a.contract(b, contract_pairs) +
-                    c.constant(T(beta)) * c;
-    }
+    contract_pairs[0] = Eigen::IndexPair<Eigen::DenseIndex>(transa == false, transb == true);
+
+    c.device(d) = a.contract(b, contract_pairs);
+
   }
 };
 

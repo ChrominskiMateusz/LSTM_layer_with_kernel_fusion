@@ -34,62 +34,62 @@ struct TensorZero {
   }
 };
 
-template <typename Device, typename T>
-struct TensorUnalignedZero {
-  void operator()(const Device& d, typename TTypes<T>::UnalignedFlat t) {
-    t.device(d) = t.constant(T(0));
-  }
-};
+// template <typename Device, typename T>
+// struct TensorUnalignedZero {
+//   void operator()(const Device& d, typename TTypes<T>::UnalignedFlat t) {
+//     t.device(d) = t.constant(T(0));
+//   }
+// };
 
-template <typename Device, typename T>
-struct TensorCopy {
-  void operator()(const Device& d, typename TTypes<T>::ConstFlat src,
-                  typename TTypes<T>::Flat dst) {
-    dst.device(d) = src;
-  }
-};
+// template <typename Device, typename T>
+// struct TensorCopy {
+//   void operator()(const Device& d, typename TTypes<T>::ConstFlat src,
+//                   typename TTypes<T>::Flat dst) {
+//     dst.device(d) = src;
+//   }
+// };
 
-template <typename Device, typename T>
-struct TensorCopyUnaligned {
-  void operator()(const Device& d, typename TTypes<T>::UnalignedConstFlat src,
-                  typename TTypes<T>::Flat dst) {
-    dst.device(d) = src;
-  }
-};
+// template <typename Device, typename T>
+// struct TensorCopyUnaligned {
+//   void operator()(const Device& d, typename TTypes<T>::UnalignedConstFlat src,
+//                   typename TTypes<T>::Flat dst) {
+//     dst.device(d) = src;
+//   }
+// };
 
-template <typename Device, typename T>
-struct TensorCopyToUnaligned {
-  void operator()(const Device& d, typename TTypes<T>::ConstFlat src,
-                  typename TTypes<T>::UnalignedFlat dst) {
-    dst.device(d) = src;
-  }
-};
+// template <typename Device, typename T>
+// struct TensorCopyToUnaligned {
+//   void operator()(const Device& d, typename TTypes<T>::ConstFlat src,
+//                   typename TTypes<T>::UnalignedFlat dst) {
+//     dst.device(d) = src;
+//   }
+// };
 
-template <typename Device, typename T>
-struct TensorAdd {
-  void operator()(const Device& d, typename TTypes<T>::ConstFlat a,
-                  typename TTypes<T>::ConstFlat b, typename TTypes<T>::Flat c) {
-    c.device(d) = a + b;
-  }
-};
+// template <typename Device, typename T>
+// struct TensorAdd {
+//   void operator()(const Device& d, typename TTypes<T>::ConstFlat a,
+//                   typename TTypes<T>::ConstFlat b, typename TTypes<T>::Flat c) {
+//     c.device(d) = a + b;
+//   }
+// };
 
-template <typename Device, typename T>
-struct TensorZeroPadding {
-  void operator()(const Device& d, const int64 time_idx,
-                  typename TTypes<int64>::ConstVec seq_len,
-                  typename TTypes<T>::Vec mask, typename TTypes<T>::Matrix m) {
-    // mask is shape [batch_size].
-    mask.device(d) = seq_len.constant(time_idx) < seq_len;
+// template <typename Device, typename T>
+// struct TensorZeroPadding {
+//   void operator()(const Device& d, const int64 time_idx,
+//                   typename TTypes<int64>::ConstVec seq_len,
+//                   typename TTypes<T>::Vec mask, typename TTypes<T>::Matrix m) {
+//     // mask is shape [batch_size].
+//     mask.device(d) = seq_len.constant(time_idx) < seq_len;
 
-    // m_shape is [batch_size, 1].
-    Eigen::array<Eigen::DenseIndex, 2> m_shape({m.dimensions()[0], 1});
-    // broadcast_shape is [1, units].
-    Eigen::array<Eigen::DenseIndex, 2> broadcast_shape({1, m.dimensions()[1]});
+//     // m_shape is [batch_size, 1].
+//     Eigen::array<Eigen::DenseIndex, 2> m_shape({m.dimensions()[0], 1});
+//     // broadcast_shape is [1, units].
+//     Eigen::array<Eigen::DenseIndex, 2> broadcast_shape({1, m.dimensions()[1]});
 
-    // m is shape [batch_size, units].
-    m.device(d) = m * mask.reshape(m_shape).broadcast(broadcast_shape);
-  }
-};
+//     // m is shape [batch_size, units].
+//     m.device(d) = m * mask.reshape(m_shape).broadcast(broadcast_shape);
+//   }
+// };
 
 struct LSTMBlockCell {
   LSTMBlockCell(const int batch_size, const int input_size, const int cell_size)
