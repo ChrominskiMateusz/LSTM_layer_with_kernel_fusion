@@ -194,7 +194,14 @@ struct LSTMBlockCellBprop : public LSTMBlockCell {
       typename TTypes<T>::Matrix df, typename TTypes<T>::Matrix di,
       typename TTypes<T>::Matrix dicfo, typename TTypes<T>::Matrix cs_prev_grad,
       typename TTypes<T>::Vec wci_grad, typename TTypes<T>::Vec wcf_grad,
-      typename TTypes<T>::Vec wco_grad);
+      typename TTypes<T>::Vec wco_grad,
+      
+      typename TTypes<T>::Matrix xh,
+      typename TTypes<T>::Matrix xh_grad, // temp
+      typename TTypes<T>::Matrix x_grad,
+      typename TTypes<T>::Matrix h_prev_grad,
+      typename TTypes<T>::Matrix w_grad,
+      typename TTypes<T>::Vec b_grad);
 };
 
 }  // namespace functor

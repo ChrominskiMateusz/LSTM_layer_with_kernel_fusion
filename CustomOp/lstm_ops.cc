@@ -150,6 +150,10 @@ REGISTER_OP("LSTMBlockCellGradOur")
     .Input("co: T")
     .Input("cs_grad: T")
     .Input("h_grad: T")
+    .Output("x_grad: T")
+    .Output("w_grad: T")
+    .Output("h_prev_grad: T")
+    .Output("b_grad: T")
     .Output("cs_prev_grad: T")
     .Output("dicfo: T")
     .Output("wci_grad: T")
@@ -163,16 +167,25 @@ REGISTER_OP("LSTMBlockCellGradOur")
       TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 2, &cs_prev));
 
       DimensionHandle batch_size = c->Dim(x, 0);
+      DimensionHandle input_size = c->Dim(x, 1);
       DimensionHandle cell_size = c->Dim(cs_prev, 1);
       DimensionHandle cell_size_times_4;
+      DimensionHandle cell_size_add_input_size;
       TF_RETURN_IF_ERROR(c->Multiply(cell_size, 4, &cell_size_times_4));
+      TF_RETURN_IF_ERROR(c->Add(cell_size, input_size, &cell_size_add_input_size));
       ShapeHandle cell_size_vec = c->Vector(cell_size);
+      ShapeHandle cell_size_times_4_vec = c->Vector(cell_size_times_4);
 
-      c->set_output(0, c->Matrix(batch_size, cell_size));
-      c->set_output(1, c->Matrix(batch_size, cell_size_times_4));
-      c->set_output(2, cell_size_vec);
-      c->set_output(3, cell_size_vec);
-      c->set_output(4, cell_size_vec);
+      c->set_output(0, c->Matrix(batch_size, input_size));
+      c->set_output(1, c->Matrix(cell_size_add_input_size, cell_size_times_4));
+      c->set_output(2, c->Matrix(batch_size, cell_size));
+      c->set_output(3, cell_size_times_4_vec);
+
+      c->set_output(4, c->Matrix(batch_size, cell_size));
+      c->set_output(5, c->Matrix(batch_size, cell_size_times_4));
+      c->set_output(6, cell_size_vec);
+      c->set_output(7, cell_size_vec);
+      c->set_output(8, cell_size_vec);
       return tensorflow::Status::OK();
     })
     .Doc(R"doc(
@@ -206,7 +219,24 @@ wco_grad: The gradient for wco to be back-propped.
 
 }  // end namespace tensorflow
 
+// num_units == cell_size
 
+// Tensor dimensions:
+// x[batch_size][input_size]
+// h[batch_size][num_units]
+// xh[batch_size][num_units + input_size]
+//
+// w[num_units + input_size][num_units * 4]
+// b[num_units * 4][1]
+// icfo[batch_size][num_units * 4]
+//
+// i[batch_size][num_units]
+// f[batch_size][num_units]
+// ci[batch_size][num_units]
+// co[batch_size][num_units]
+// o[batch_size][num_units]
+//
+// cs[batch_size][num_units]
 
 namespace tensorflow {
 
@@ -232,17 +262,11 @@ void LSTMBlockCellFpropWithEigen(
     typename TTypes<T>::Matrix co, typename TTypes<T>::Matrix icfo,
     typename TTypes<T>::Matrix h) {
 
-  // g_log << "No czesc tutaj forward prop\n";
-
-  // g_log << "W:\n";
-  // g_log << w << "\n\n";
-
-  // g_log << "ICFO:\n";
+  // g_log << "icfo:\n";
   // g_log << icfo << "\n\n";
 
-  //Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex> sparse = icfo;
-
-  Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> sparse = icfo;
+  // Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex> tmp = icfo;
+  // Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> tmp = icfo;
 
   // Concat xh = [x, h].
   xh.slice(cell.xh_x_offsets(), cell.xh_x_extents()).device(d) = x;
@@ -331,7 +355,13 @@ void LSTMBlockCellBpropWithEigen(
     typename TTypes<T>::Matrix df, typename TTypes<T>::Matrix di,
     typename TTypes<T>::Matrix dicfo, typename TTypes<T>::Matrix cs_prev_grad,
     typename TTypes<T>::Vec wci_grad, typename TTypes<T>::Vec wcf_grad,
-    typename TTypes<T>::Vec wco_grad) {
+    typename TTypes<T>::Vec wco_grad,
+    typename TTypes<T>::Matrix xh,
+    typename TTypes<T>::Matrix xh_grad,
+    typename TTypes<T>::Matrix x_grad,
+    typename TTypes<T>::Matrix h_prev_grad,
+    typename TTypes<T>::Matrix w_grad,
+    typename TTypes<T>::Vec b_grad) {
   
   // do[t] = sigm'(o[t]) .* dh[t] .* co[t]
   do_.device(d) = o * (o.constant(T(1)) - o) * h_grad * co;
@@ -369,6 +399,32 @@ void LSTMBlockCellBpropWithEigen(
     wcf_grad.device(d) = (df * cs_prev).sum(Eigen::array<int, 1>({0}));
     wco_grad.device(d) = (do_ * cs).sum(Eigen::array<int, 1>({0}));
   }
+
+  // Continue Bprop here instead of in python wrapper
+  
+  // temp resoure for xh_grad
+  typename TTypes<T>::ConstMatrix const_dicfo(dicfo.data(),
+                                              dicfo.dimensions());
+
+  // xh_grad = dicfo * w^T
+  TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
+      ctx, d, false, true, const_dicfo, w, xh_grad);
+  
+  // x_grad and h_prev_grad
+  x_grad.device(d) = xh_grad.slice(cell.xh_x_offsets(), cell.xh_x_extents());
+  h_prev_grad.device(d) = xh_grad.slice(cell.xh_h_offsets(), cell.xh_h_extents());
+
+  // temp resource for w_grad
+  xh.slice(cell.xh_x_offsets(), cell.xh_x_extents()).device(d) = x;
+  xh.slice(cell.xh_h_offsets(), cell.xh_h_extents()).device(d) = h_prev;
+  typename TTypes<T>::ConstMatrix const_xh(xh.data(), xh.dimensions());
+
+  // w_grad = xh^T * dicfo
+  TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
+        ctx, d, true, false, const_xh, const_dicfo, w_grad);
+
+  // b_grad
+  b_grad.device(d) = dicfo.sum(Eigen::array<int, 1>({0}));
 }
 
 #define DEFINE_CPU_SPECS(T)                                                   \
@@ -409,11 +465,18 @@ void LSTMBlockCellBpropWithEigen(
       typename TTypes<T>::Matrix dicfo,                                       \
       typename TTypes<T>::Matrix cs_prev_grad,                                \
       typename TTypes<T>::Vec wci_grad, typename TTypes<T>::Vec wcf_grad,     \
-      typename TTypes<T>::Vec wco_grad) {                                     \
+      typename TTypes<T>::Vec wco_grad,                                       \
+      typename TTypes<T>::Matrix xh,                                          \
+      typename TTypes<T>::Matrix xh_grad,                                     \
+      typename TTypes<T>::Matrix x_grad,                                      \
+      typename TTypes<T>::Matrix h_prev_grad,                                 \
+      typename TTypes<T>::Matrix w_grad,                                      \
+      typename TTypes<T>::Vec b_grad) {                                       \
     LSTMBlockCellBpropWithEigen<CPUDevice, T, false /* USE_CUBLAS */>(        \
         *this, ctx, d, use_peephole, x, cs_prev, h_prev, w, wci, wcf, wco, b, \
         i, cs, f, o, ci, co, cs_grad, h_grad, do_, dcs, dci, df, di, dicfo,   \
-        cs_prev_grad, wci_grad, wcf_grad, wco_grad);                          \
+        cs_prev_grad, wci_grad, wcf_grad, wco_grad,                           \
+        xh, xh_grad, x_grad, h_prev_grad, w_grad, b_grad);                    \
   }                                                                           \
   template struct LSTMBlockCellFprop<CPUDevice, T, false /* USE_CUBLAS */>;   \
   template struct LSTMBlockCellBprop<CPUDevice, T, false /* USE_CUBLAS */>;
@@ -459,9 +522,9 @@ class LSTMBlockCellOp : public OpKernel {
     const Tensor* b_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("b", &b_tensor));
 
-    const int64 batch_size = x_tensor->dim_size(0);
-    const int64 input_size = x_tensor->dim_size(1);
-    const int64 cell_size = cs_prev_tensor->dim_size(1);
+    const int64 batch_size = x_tensor->dim_size(0);      // batch_size from wrapper
+    const int64 input_size = x_tensor->dim_size(1);      // input_size
+    const int64 cell_size = cs_prev_tensor->dim_size(1); // num_units
 
     // Sanity checks for our input shapes.
     OP_REQUIRES(ctx, cs_prev_tensor->dim_size(0) == batch_size,
@@ -764,6 +827,23 @@ class LSTMBlockCellGradOp : public OpKernel {
         ctx, ctx->forward_input_or_allocate_output(
                  {"wco"}, "wco_grad", wco_tensor->shape(), &wco_grad_tensor));
 
+    Tensor* x_grad_tensor = nullptr;
+    OP_REQUIRES_OK(ctx,
+                   ctx->allocate_output("x_grad", x_tensor->shape(), &x_grad_tensor));
+
+    Tensor* w_grad_tensor = nullptr;
+    OP_REQUIRES_OK(
+        ctx, ctx->allocate_output("w_grad", w_tensor->shape(), &w_grad_tensor));
+
+    Tensor* h_prev_grad_tensor = nullptr;
+    OP_REQUIRES_OK(ctx,
+                   ctx->allocate_output("h_prev_grad", h_prev_tensor->shape(),
+                                        &h_prev_grad_tensor));
+
+    Tensor* b_grad_tensor = nullptr;
+    OP_REQUIRES_OK(
+        ctx, ctx->allocate_output("b_grad", b_tensor->shape(), &b_grad_tensor));
+
     // Allocate our temp tensors.
     Tensor do_tensor;
     OP_REQUIRES_OK(ctx, ctx->allocate_temp(DataTypeToEnum<T>::v(),
@@ -790,11 +870,24 @@ class LSTMBlockCellGradOp : public OpKernel {
                                            TensorShape({batch_size, cell_size}),
                                            &di_tensor));
 
+    Tensor xh_tensor;
+    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DataTypeToEnum<T>::v(),
+                                           TensorShape({batch_size, input_size + cell_size}), 
+                                           &xh_tensor));
+
+    Tensor xh_grad_tensor;
+    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DataTypeToEnum<T>::v(),
+                                           TensorShape({batch_size, input_size + cell_size}), 
+                                           &xh_grad_tensor));
+
     const Device& device = ctx->eigen_device<Device>();
 
     functor::TensorZero<Device, T>()(device, wci_grad_tensor->flat<T>());
     functor::TensorZero<Device, T>()(device, wcf_grad_tensor->flat<T>());
     functor::TensorZero<Device, T>()(device, wco_grad_tensor->flat<T>());
+
+    //functor::TensorZero<Device, T>()(device, w_grad_tensor->flat<T>());
+    //functor::TensorZero<Device, T>()(device, b_grad_tensor->flat<T>());
 
     functor::LSTMBlockCellBprop<Device, T, USE_CUBLAS>(batch_size, input_size,
                                                        cell_size)(
@@ -808,7 +901,14 @@ class LSTMBlockCellGradOp : public OpKernel {
         do_tensor.matrix<T>(), dcs_tensor.matrix<T>(), dci_tensor.matrix<T>(),
         df_tensor.matrix<T>(), di_tensor.matrix<T>(), dicfo_tensor->matrix<T>(),
         cs_prev_grad_tensor->matrix<T>(), wci_grad_tensor->vec<T>(),
-        wcf_grad_tensor->vec<T>(), wco_grad_tensor->vec<T>());
+        wcf_grad_tensor->vec<T>(), wco_grad_tensor->vec<T>(), 
+
+        xh_tensor.matrix<T>(),
+        xh_grad_tensor.matrix<T>(),
+        x_grad_tensor->matrix<T>(),
+        h_prev_grad_tensor->matrix<T>(),
+        w_grad_tensor->matrix<T>(),
+        b_grad_tensor->vec<T>());
   }
 
  protected:

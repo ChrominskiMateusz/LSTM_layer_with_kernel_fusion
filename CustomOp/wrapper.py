@@ -154,7 +154,7 @@ def _LSTMBlockCellGrad(op, *grad):
   if cell_size is None:
     raise ValueError("cell_size from `cs_prev` should not be None.")
 
-  (cs_prev_grad, dicfo, wci_grad, wcf_grad,
+  (x_grad, w_grad, h_prev_grad, b_grad, cs_prev_grad, dicfo, wci_grad, wcf_grad,
    wco_grad) = _lstm_ops_so.lstm_block_cell_grad_our(
        x,
        cs_prev,
@@ -174,24 +174,24 @@ def _LSTMBlockCellGrad(op, *grad):
        h_grad,
        use_peephole=op.get_attr("use_peephole"))
 
-  # Backprop from dicfo to xh.
-  xh_grad = math_ops.matmul(dicfo, w, transpose_b=True)
+  # # Backprop from dicfo to xh.
+  # xh_grad = math_ops.matmul(dicfo, w, transpose_b=True)
 
-  x_grad = array_ops.slice(xh_grad, (0, 0), (batch_size, input_size))
-  x_grad.get_shape().merge_with(x.get_shape())
+  # x_grad = array_ops.slice(xh_grad, (0, 0), (batch_size, input_size))
+  # x_grad.get_shape().merge_with(x.get_shape())
 
-  h_prev_grad = array_ops.slice(xh_grad, (0, input_size),
-                                (batch_size, cell_size))
-  h_prev_grad.get_shape().merge_with(h_prev.get_shape())
+  # h_prev_grad = array_ops.slice(xh_grad, (0, input_size),
+  #                              (batch_size, cell_size))
+  # h_prev_grad.get_shape().merge_with(h_prev.get_shape())
 
-  # Backprop from dicfo to w.
-  xh = array_ops.concat([x, h_prev], 1)
-  w_grad = math_ops.matmul(xh, dicfo, transpose_a=True)
-  w_grad.get_shape().merge_with(w.get_shape())
+  # # Backprop from dicfo to w.
+  # xh = array_ops.concat([x, h_prev], 1)
+  # w_grad = math_ops.matmul(xh, dicfo, transpose_a=True)
+  # w_grad.get_shape().merge_with(w.get_shape())
 
-  # Backprop from dicfo to b.
-  b_grad = nn_ops.bias_add_grad(dicfo)
-  b_grad.get_shape().merge_with(b.get_shape())
+  # # Backprop from dicfo to b.
+  # b_grad = nn_ops.bias_add_grad(dicfo)
+  # b_grad.get_shape().merge_with(b.get_shape())
 
   return (x_grad, cs_prev_grad, h_prev_grad, w_grad, wci_grad, wcf_grad,
           wco_grad, b_grad)
