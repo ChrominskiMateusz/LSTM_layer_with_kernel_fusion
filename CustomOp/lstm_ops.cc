@@ -34,10 +34,45 @@ limitations under the License.
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
-
+#include <fstream>
 
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/shape_inference.h"
+
+template<typename T>
+const T count_delete_point (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, const float& percentage, const T& average)
+{
+	std::vector<T> elements;
+	for (int i{}; i < matrix.size (); i++)
+		elements.push_back (matrix.data ()[i]);
+
+	std::sort (elements.begin (), elements.end (), [&average](T a, T b) {
+		return abs (a - average) < abs (b - average);
+	});
+
+	return abs (elements[int (elements.size () * percentage)] - average);
+}
+
+template<typename T>
+const T count_average (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix)
+{
+	T sum{};  // nie wiem czemu tu kurwa nie działa normalne matrix.sum () xD coś znowu z typami 
+	for (int i{}; i < matrix.size (); i++)
+		sum += matrix.data ()[i];
+
+	return sum / matrix.size ();
+}
+
+template<typename T>
+void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, const float& percentage)
+{
+	const T average = count_average (matrix);
+	const T delete_point = count_delete_point (matrix, percentage, average);
+	
+	for (int i{}; i < matrix.size (); i++)
+		if (abs (matrix.data ()[i] - average) > delete_point)
+			matrix.data ()[i] = (T)NULL;
+}
 
 namespace tensorflow {
 
@@ -309,6 +344,12 @@ void LSTMBlockCellBpropWithEigen(
     typename TTypes<T>::Matrix dicfo, typename TTypes<T>::Matrix cs_prev_grad,
     typename TTypes<T>::Vec wci_grad, typename TTypes<T>::Vec wcf_grad,
     typename TTypes<T>::Vec wco_grad) {
+
+  make_sparse(di, 0.20);
+  make_sparse(dci, 0.20);
+  make_sparse(df, 0.20);
+  make_sparse(do_, 0.20);
+
   // do[t] = sigm'(o[t]) .* dh[t] .* co[t]
   do_.device(d) = o * (o.constant(T(1)) - o) * h_grad * co;
 
