@@ -35,43 +35,25 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
 #include <fstream>
+#include <thread>
+#include <chrono>
 
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/shape_inference.h"
 
 template<typename T>
-const T count_delete_point (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, const float& percentage, const T& average)
-{
-	std::vector<T> elements;
-	for (int i{}; i < matrix.size (); i++)
-		elements.push_back (matrix.data ()[i]);
-
-	std::sort (elements.begin (), elements.end (), [&average](T a, T b) {
-		return abs (a - average) < abs (b - average);
-	});
-
-	return abs (elements[int (elements.size () * percentage)] - average);
-}
-
-template<typename T>
-const T count_average (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix)
-{
-	T sum{};  // nie wiem czemu tu kurwa nie działa normalne matrix.sum () xD coś znowu z typami 
-	for (int i{}; i < matrix.size (); i++)
-		sum += matrix.data ()[i];
-
-	return sum / matrix.size ();
-}
-
-template<typename T>
 void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, const float& percentage)
 {
-	const T average = count_average (matrix);
-	const T delete_point = count_delete_point (matrix, percentage, average);
-	
+  std::vector<int> elements;
 	for (int i{}; i < matrix.size (); i++)
-		if (abs (matrix.data ()[i] - average) > delete_point)
-			matrix.data ()[i] = (T)NULL;
+    elements.push_back (i);
+
+	std::sort (elements.begin (), elements.end (), [&matrix](int a, int b) {
+		return fabs (float (matrix.data ()[a])) > fabs (float (matrix.data ()[b]));
+	});
+  
+	for (int i{int (matrix.size () * percentage)}; i < matrix.size (); i++)
+		matrix.data ()[elements[i]] = (T)NULL;
 }
 
 namespace tensorflow {
@@ -345,11 +327,6 @@ void LSTMBlockCellBpropWithEigen(
     typename TTypes<T>::Vec wci_grad, typename TTypes<T>::Vec wcf_grad,
     typename TTypes<T>::Vec wco_grad) {
 
-  make_sparse(di, 0.20);
-  make_sparse(dci, 0.20);
-  make_sparse(df, 0.20);
-  make_sparse(do_, 0.20);
-
   // do[t] = sigm'(o[t]) .* dh[t] .* co[t]
   do_.device(d) = o * (o.constant(T(1)) - o) * h_grad * co;
 
@@ -371,6 +348,12 @@ void LSTMBlockCellBpropWithEigen(
 
   // di[t] = sigm'(i[t]) dcs[t] ci[t]
   di.device(d) = i * (i.constant(T(1)) - i) * dcs * ci;
+
+  const float PERCENTAGE = 0.20;
+  make_sparse(di, PERCENTAGE);
+  make_sparse(dci, PERCENTAGE);
+  make_sparse(df, PERCENTAGE);
+  make_sparse(do_, PERCENTAGE);
 
   dicfo.slice(cell.icfo_i_offsets(), cell.cell_extents()).device(d) = di;
   dicfo.slice(cell.icfo_c_offsets(), cell.cell_extents()).device(d) = dci;
