@@ -34,9 +34,6 @@ limitations under the License.
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
-#include <fstream>
-#include <thread>
-#include <chrono>
 
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/shape_inference.h"
@@ -44,9 +41,9 @@ limitations under the License.
 template<typename T>
 void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, const float& percentage)
 {
-  std::vector<int> elements;
+	std::vector<int> elements;
 	for (int i{}; i < matrix.size (); i++)
-    elements.push_back (i);
+		elements.push_back (i);
 
 	std::sort (elements.begin (), elements.end (), [&matrix](int a, int b) {
 		return fabs (float (matrix.data ()[a])) > fabs (float (matrix.data ()[b]));
