@@ -42,8 +42,10 @@ template<typename T>
 void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, const float& percentage)
 {
   std::vector<int> elements;
+  elements.reserve(matrix.size ());
+  
   for (int i{}; i < matrix.size (); i++)
-    elements.push_back (i);
+    elements.emplace_back (i);
 
   std::sort (elements.begin (), elements.end (), [&matrix](int a, int b) {
     return fabs (float (matrix.data ()[a])) > fabs (float (matrix.data ()[b]));
