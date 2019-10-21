@@ -41,16 +41,16 @@ limitations under the License.
 template<typename T>
 void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, const float& percentage)
 {
-	std::vector<int> elements;
-	for (int i{}; i < matrix.size (); i++)
-		elements.push_back (i);
+  std::vector<int> elements;
+  for (int i{}; i < matrix.size (); i++)
+    elements.push_back (i);
 
-	std::sort (elements.begin (), elements.end (), [&matrix](int a, int b) {
-		return fabs (float (matrix.data ()[a])) > fabs (float (matrix.data ()[b]));
-	});
+  std::sort (elements.begin (), elements.end (), [&matrix](int a, int b) {
+    return fabs (float (matrix.data ()[a])) > fabs (float (matrix.data ()[b]));
+  });
   
-	for (int i{int (matrix.size () * percentage)}; i < matrix.size (); i++)
-		matrix.data ()[elements[i]] = (T)NULL;
+  for (int i{int (matrix.size () * percentage)}; i < matrix.size (); i++)
+    matrix.data ()[elements[i]] = (T)NULL;
 }
 
 namespace tensorflow {
