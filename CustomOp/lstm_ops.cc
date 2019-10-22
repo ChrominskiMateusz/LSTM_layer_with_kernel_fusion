@@ -52,7 +52,7 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
                   const float& percentage)
 {
   std::vector<int> elements;
-  full_vector (elements, matrix.size ());
+  fill_vector (elements, matrix.size ());
 
   std::sort (elements.begin (), elements.end (), [&matrix](int a, int b) {
     return fabs (float (matrix.data ()[a])) > fabs (float (matrix.data ()[b]));
