@@ -5,5 +5,8 @@
 *.vscode
 *.code-workspace
 
+# Logs
+*.bin
+
 # Python temp files
 __pycache__

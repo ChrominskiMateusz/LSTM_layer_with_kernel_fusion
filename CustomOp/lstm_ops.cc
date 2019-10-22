@@ -32,13 +32,13 @@ limitations under the License.
 #include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/framework/tensor_types.h"
 #include "tensorflow/core/framework/types.h"
+#include "tensorflow/core/framework/op.h"
+#include "tensorflow/core/framework/shape_inference.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
 
-#include "tensorflow/core/framework/op.h"
-#include "tensorflow/core/framework/shape_inference.h"
 
-void full_vector (std::vector<int>& vec, const int& size)
+void fill_vector (std::vector<int>& vec, const int& size)
 {
   vec.reserve(size);
 
@@ -47,7 +47,9 @@ void full_vector (std::vector<int>& vec, const int& size)
 }
 
 template<typename T>
-void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, const float& percentage)
+void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, 
+                  Eigen::Aligned> matrix, 
+                  const float& percentage)
 {
   std::vector<int> elements;
   full_vector (elements, matrix.size ());
