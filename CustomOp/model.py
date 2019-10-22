@@ -1,6 +1,7 @@
 # Based on:
 # https://jasdeep06.github.io/posts/Understanding-LSTM-in-Tensorflow-MNIST/
 
+import time as time
 import tensorflow as tf
 
 import wrapper as wrap
@@ -61,6 +62,8 @@ init=tf.compat.v1.global_variables_initializer()
 with tf.compat.v1.Session() as sess:
     sess.run(init)
     iter=1
+
+    start_time = time.time()
     while iter<100000:
         batch_x,batch_y=mnist.train.next_batch(batch_size=batch_size)
 
@@ -77,3 +80,6 @@ with tf.compat.v1.Session() as sess:
             print("__________________")
 
         iter=iter+1
+    
+    duration = time.time() - start_time
+    print(duration)
