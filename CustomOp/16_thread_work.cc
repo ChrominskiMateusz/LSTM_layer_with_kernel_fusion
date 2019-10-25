@@ -49,7 +49,7 @@ void fill_vector (std::vector<int>& vec, const int& size)
 }
 
 template<typename T>
-static void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, 
+void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, 
                   Eigen::Aligned> matrix, 
                   std::vector<int> elements, 
                   const int group_size, 
@@ -364,21 +364,48 @@ void LSTMBlockCellBpropWithEigen(
   std::vector<int> elements;
   fill_vector (elements, GROUP_SIZE);
   
-  std::thread di_thread (&make_sparse<T>, di, elements, GROUP_SIZE, START, di.size ());  
-  std::thread dci_thread (&make_sparse<T>, dci, elements, GROUP_SIZE, START, dci.size ());
-  std::thread df_thread (&make_sparse<T>, df, elements, GROUP_SIZE, START, df.size ());
-  std::thread do__thread (&make_sparse<T>, do_, elements, GROUP_SIZE, START, do_.size ());
+  std::thread di_thread (&make_sparse<T>, di, elements, GROUP_SIZE, START, di.size () / 4);  
+  std::thread di_thread2 (&make_sparse<T>, di, elements, GROUP_SIZE, di.size () / 4, di.size () / 4 * 2);  
+  std::thread di_thread3 (&make_sparse<T>, di, elements, GROUP_SIZE, di.size () / 4 * 2, di.size () / 4 * 3);    
+  std::thread di_thread4 (&make_sparse<T>, di, elements, GROUP_SIZE, di.size () / 4 * 3, di.size ());  
+
+  std::thread dci_thread (&make_sparse<T>, dci, elements, GROUP_SIZE, START, dci.size () / 4);
+  std::thread dci_thread2 (&make_sparse<T>, dci, elements, GROUP_SIZE, dci.size () / 4, dci.size () / 4 * 2);
+  std::thread dci_thread3 (&make_sparse<T>, dci, elements, GROUP_SIZE, dci.size () / 4 * 2, dci.size () / 4 * 3);
+  std::thread dci_thread4 (&make_sparse<T>, dci, elements, GROUP_SIZE, dci.size () / 4 * 3, dci.size ());
+
+  std::thread df_thread (&make_sparse<T>, df, elements, GROUP_SIZE, START, df.size () / 4);
+  std::thread df_thread2 (&make_sparse<T>, df, elements, GROUP_SIZE, df.size () / 4, df.size () / 4 * 2);
+  std::thread df_thread3 (&make_sparse<T>, df, elements, GROUP_SIZE, df.size () / 4 * 2, df.size () / 4 * 3);
+  std::thread df_thread4 (&make_sparse<T>, df, elements, GROUP_SIZE, df.size () / 4 * 3, df.size ());
+
+  std::thread do__thread (&make_sparse<T>, do_, elements, GROUP_SIZE, START, do_.size () / 4);
+  std::thread do__thread2 (&make_sparse<T>, do_, elements, GROUP_SIZE, do_.size () / 4, do_.size () / 4 * 2);
+  std::thread do__thread3 (&make_sparse<T>, do_, elements, GROUP_SIZE, do_.size () / 4 * 2, do_.size () / 4 * 3);
+  std::thread do__thread4 (&make_sparse<T>, do_, elements, GROUP_SIZE, do_.size () / 4 * 3, do_.size ());
   
   di_thread.join ();
+  di_thread2.join ();
+  di_thread3.join ();
+  di_thread4.join ();
   dicfo.slice(cell.icfo_i_offsets(), cell.cell_extents()).device(d) = di;
 
   dci_thread.join ();
+  dci_thread2.join ();
+  dci_thread3.join ();
+  dci_thread4.join ();
   dicfo.slice(cell.icfo_c_offsets(), cell.cell_extents()).device(d) = dci;
 
   df_thread.join ();
+  df_thread2.join ();
+  df_thread3.join ();
+  df_thread4.join ();
   dicfo.slice(cell.icfo_f_offsets(), cell.cell_extents()).device(d) = df;
-  
+
   do__thread.join ();
+  do__thread2.join ();
+  do__thread3.join ();
+  do__thread4.join ();
   dicfo.slice(cell.icfo_o_offsets(), cell.cell_extents()).device(d) = do_;
 
   cs_prev_grad.device(d) = dcs * f;

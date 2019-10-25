@@ -49,7 +49,7 @@ void fill_vector (std::vector<int>& vec, const int& size)
 }
 
 template<typename T>
-static void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, 
+void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, 
                   Eigen::Aligned> matrix, 
                   std::vector<int> elements, 
                   const int group_size, 
@@ -364,21 +364,26 @@ void LSTMBlockCellBpropWithEigen(
   std::vector<int> elements;
   fill_vector (elements, GROUP_SIZE);
   
-  std::thread di_thread (&make_sparse<T>, di, elements, GROUP_SIZE, START, di.size ());  
-  std::thread dci_thread (&make_sparse<T>, dci, elements, GROUP_SIZE, START, dci.size ());
-  std::thread df_thread (&make_sparse<T>, df, elements, GROUP_SIZE, START, df.size ());
-  std::thread do__thread (&make_sparse<T>, do_, elements, GROUP_SIZE, START, do_.size ());
+  std::thread di_thread (&make_sparse<T>, di, elements, GROUP_SIZE, START, di.size () / 2);  
+  std::thread di_thread2 (&make_sparse<T>, di, elements, GROUP_SIZE, di.size () / 2, di.size ());  
+  std::thread dci_thread (&make_sparse<T>, dci, elements, GROUP_SIZE, START, dci.size () / 2);
+  std::thread dci_thread2 (&make_sparse<T>, dci, elements, GROUP_SIZE, dci.size () / 2, dci.size ());
+  std::thread df_thread (&make_sparse<T>, df, elements, GROUP_SIZE, START, df.size () / 2);
+  std::thread df_thread2 (&make_sparse<T>, df, elements, GROUP_SIZE, df.size () / 2, df.size ());
+  std::thread do__thread (&make_sparse<T>, do_, elements, GROUP_SIZE, START, do_.size () / 2);
+  std::thread do__thread2 (&make_sparse<T>, do_, elements, GROUP_SIZE, do_.size () / 2, do_.size ());
   
   di_thread.join ();
+  di_thread2.join ();
   dicfo.slice(cell.icfo_i_offsets(), cell.cell_extents()).device(d) = di;
-
   dci_thread.join ();
+  dci_thread2.join ();
   dicfo.slice(cell.icfo_c_offsets(), cell.cell_extents()).device(d) = dci;
-
   df_thread.join ();
+  df_thread2.join ();
   dicfo.slice(cell.icfo_f_offsets(), cell.cell_extents()).device(d) = df;
-  
   do__thread.join ();
+  do__thread2.join ();
   dicfo.slice(cell.icfo_o_offsets(), cell.cell_extents()).device(d) = do_;
 
   cs_prev_grad.device(d) = dcs * f;

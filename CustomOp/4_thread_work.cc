@@ -371,13 +371,10 @@ void LSTMBlockCellBpropWithEigen(
   
   di_thread.join ();
   dicfo.slice(cell.icfo_i_offsets(), cell.cell_extents()).device(d) = di;
-
   dci_thread.join ();
   dicfo.slice(cell.icfo_c_offsets(), cell.cell_extents()).device(d) = dci;
-
   df_thread.join ();
   dicfo.slice(cell.icfo_f_offsets(), cell.cell_extents()).device(d) = df;
-  
   do__thread.join ();
   dicfo.slice(cell.icfo_o_offsets(), cell.cell_extents()).device(d) = do_;
 
