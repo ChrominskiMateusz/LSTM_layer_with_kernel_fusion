@@ -155,7 +155,7 @@ def _LSTMBlockCellGrad(op, *grad):
     raise ValueError("cell_size from `cs_prev` should not be None.")
 
   (cs_prev_grad, dicfo, wci_grad, wcf_grad,
-   wco_grad) = _lstm_ops_so.lstm_block_cell_grad_our(
+   wco_grad, values, indices) = _lstm_ops_so.lstm_block_cell_grad_our(
        x,
        cs_prev,
        h_prev,

@@ -177,6 +177,8 @@ REGISTER_OP("LSTMBlockCellGradOur")
     .Output("wci_grad: T")
     .Output("wcf_grad: T")
     .Output("wco_grad: T")
+    .Output("values: T")
+    .Output("indices: int64")
     .Attr("use_peephole: bool")
     .Attr("T: {half, float}")
     .SetShapeFn([](InferenceContext* c) {
@@ -195,6 +197,11 @@ REGISTER_OP("LSTMBlockCellGradOur")
       c->set_output(2, cell_size_vec);
       c->set_output(3, cell_size_vec);
       c->set_output(4, cell_size_vec);
+
+      // Our Outputs
+      // elements_left = 100;
+      c->set_output(5, c->Vector(100));
+      c->set_output(6, c->Matrix(100, 2));
       return tensorflow::Status::OK();
     })
     .Doc(R"doc(
@@ -335,7 +342,9 @@ void LSTMBlockCellBpropWithEigen(
     typename TTypes<T>::Matrix df, typename TTypes<T>::Matrix di,
     typename TTypes<T>::Matrix dicfo, typename TTypes<T>::Matrix cs_prev_grad,
     typename TTypes<T>::Vec wci_grad, typename TTypes<T>::Vec wcf_grad,
-    typename TTypes<T>::Vec wco_grad) {
+    typename TTypes<T>::Vec wco_grad,
+    typename TTypes<T>::Vec values,
+    typename TTypes<int64>::Matrix indices) {
 
   // do[t] = sigm'(o[t]) .* dh[t] .* co[t]
   do_.device(d) = o * (o.constant(T(1)) - o) * h_grad * co;
@@ -430,11 +439,13 @@ void LSTMBlockCellBpropWithEigen(
       typename TTypes<T>::Matrix dicfo,                                       \
       typename TTypes<T>::Matrix cs_prev_grad,                                \
       typename TTypes<T>::Vec wci_grad, typename TTypes<T>::Vec wcf_grad,     \
-      typename TTypes<T>::Vec wco_grad) {                                     \
+      typename TTypes<T>::Vec wco_grad,                                       \
+      typename TTypes<T>::Vec values,                                         \
+      typename TTypes<int64>::Matrix indices) {                               \
     LSTMBlockCellBpropWithEigen<CPUDevice, T, false /* USE_CUBLAS */>(        \
         *this, ctx, d, use_peephole, x, cs_prev, h_prev, w, wci, wcf, wco, b, \
         i, cs, f, o, ci, co, cs_grad, h_grad, do_, dcs, dci, df, di, dicfo,   \
-        cs_prev_grad, wci_grad, wcf_grad, wco_grad);                          \
+        cs_prev_grad, wci_grad, wcf_grad, wco_grad, values, indices);         \
   }                                                                           \
   template struct LSTMBlockCellFprop<CPUDevice, T, false /* USE_CUBLAS */>;   \
   template struct LSTMBlockCellBprop<CPUDevice, T, false /* USE_CUBLAS */>;
@@ -594,42 +605,6 @@ class LSTMBlockCellOp : public OpKernel {
 REGISTER_KERNEL(float);
 REGISTER_KERNEL(Eigen::half);
 #undef REGISTER_KERNEL
-
-#if GOOGLE_CUDA
-namespace functor {
-#define DECLARE_GPU_SPEC(T)                                                \
-  template <>                                                              \
-  void LSTMBlockCellFprop<GPUDevice, T, true>::operator()(                 \
-      OpKernelContext* ctx, const GPUDevice& d, const float forget_bias,   \
-      const float cell_clip, bool use_peephole,                            \
-      typename TTypes<T>::ConstMatrix x,                                   \
-      typename TTypes<T>::ConstMatrix cs_prev,                             \
-      typename TTypes<T>::ConstMatrix h_prev,                              \
-      typename TTypes<T>::ConstMatrix w, typename TTypes<T>::ConstVec wci, \
-      typename TTypes<T>::ConstVec wcf, typename TTypes<T>::ConstVec wco,  \
-      typename TTypes<T>::ConstVec b, typename TTypes<T>::Matrix xh,       \
-      typename TTypes<T>::Matrix i, typename TTypes<T>::Matrix cs,         \
-      typename TTypes<T>::Matrix f, typename TTypes<T>::Matrix o,          \
-      typename TTypes<T>::Matrix ci, typename TTypes<T>::Matrix co,        \
-      typename TTypes<T>::Matrix icfo, typename TTypes<T>::Matrix h);      \
-                                                                           \
-  extern template struct LSTMBlockCellFprop<GPUDevice, T, true>;
-
-DECLARE_GPU_SPEC(float);
-DECLARE_GPU_SPEC(Eigen::half);
-#undef DECLARE_GPU_SPEC
-}  // end namespace functor
-
-#define REGISTER_GPU_KERNEL(T)                                         \
-  REGISTER_KERNEL_BUILDER(                                             \
-      Name("LSTMBlockCell").Device(DEVICE_GPU).TypeConstraint<T>("T"), \
-      LSTMBlockCellOp<GPUDevice, T, true>);
-
-REGISTER_GPU_KERNEL(float);
-REGISTER_GPU_KERNEL(Eigen::half);
-// REGISTER_GPU_KERNEL(double);
-#undef REGISTER_GPU_KERNEL
-#endif  // GOOGLE_CUDA
 
 template <typename Device, typename T, bool USE_CUBLAS>
 class LSTMBlockCellGradOp : public OpKernel {
@@ -823,6 +798,17 @@ class LSTMBlockCellGradOp : public OpKernel {
         ctx, ctx->forward_input_or_allocate_output(
                  {"wco"}, "wco_grad", wco_tensor->shape(), &wco_grad_tensor));
 
+    // Added by us ouputs allocation
+    Tensor* values_tensor = nullptr;
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(
+                            "values", TensorShape({elements_left}),
+                            &values_tensor));
+
+      Tensor* indices_tensor = nullptr;
+    OP_REQUIRES_OK(ctx, ctx->allocate_output(
+                            "indices", TensorShape({elements_left, 2}),
+                            &indices_tensor));
+
     // Allocate our temp tensors.
     Tensor do_tensor;
     OP_REQUIRES_OK(ctx, ctx->allocate_temp(DataTypeToEnum<T>::v(),
@@ -867,11 +853,14 @@ class LSTMBlockCellGradOp : public OpKernel {
         do_tensor.matrix<T>(), dcs_tensor.matrix<T>(), dci_tensor.matrix<T>(),
         df_tensor.matrix<T>(), di_tensor.matrix<T>(), dicfo_tensor->matrix<T>(),
         cs_prev_grad_tensor->matrix<T>(), wci_grad_tensor->vec<T>(),
-        wcf_grad_tensor->vec<T>(), wco_grad_tensor->vec<T>());
+        wcf_grad_tensor->vec<T>(), wco_grad_tensor->vec<T>(),
+        values_tensor->vec<T>(),
+        indices_tensor->matrix<int64>());
   }
 
  protected:
   bool use_peephole_;
+  const int elements_left = 100;
 };
 
 #define REGISTER_KERNEL(T)                                                 \
@@ -881,49 +870,5 @@ class LSTMBlockCellGradOp : public OpKernel {
 REGISTER_KERNEL(float);
 REGISTER_KERNEL(Eigen::half);
 #undef REGISTER_KERNEL
-
-#if GOOGLE_CUDA
-namespace functor {
-#define DECLARE_GPU_SPEC(T)                                                   \
-  template <>                                                                 \
-  void LSTMBlockCellBprop<GPUDevice, T, true>::operator()(                    \
-      OpKernelContext* ctx, const GPUDevice& d, bool use_peephole,            \
-      typename TTypes<T>::ConstMatrix x,                                      \
-      typename TTypes<T>::ConstMatrix cs_prev,                                \
-      typename TTypes<T>::ConstMatrix h_prev,                                 \
-      typename TTypes<T>::ConstMatrix w, typename TTypes<T>::ConstVec wci,    \
-      typename TTypes<T>::ConstVec wcf, typename TTypes<T>::ConstVec wco,     \
-      typename TTypes<T>::ConstVec b, typename TTypes<T>::ConstMatrix i,      \
-      typename TTypes<T>::ConstMatrix cs, typename TTypes<T>::ConstMatrix f,  \
-      typename TTypes<T>::ConstMatrix o, typename TTypes<T>::ConstMatrix ci,  \
-      typename TTypes<T>::ConstMatrix co,                                     \
-      typename TTypes<T>::ConstMatrix cs_grad,                                \
-      typename TTypes<T>::ConstMatrix h_grad, typename TTypes<T>::Matrix do_, \
-      typename TTypes<T>::Matrix dcs, typename TTypes<T>::Matrix dci,         \
-      typename TTypes<T>::Matrix df, typename TTypes<T>::Matrix di,           \
-      typename TTypes<T>::Matrix dicfo,                                       \
-      typename TTypes<T>::Matrix cs_prev_grad,                                \
-      typename TTypes<T>::Vec wci_grad, typename TTypes<T>::Vec wcf_grad,     \
-      typename TTypes<T>::Vec wco_grad);                                      \
-                                                                              \
-  extern template struct LSTMBlockCellBprop<GPUDevice, T,                     \
-                                            true /* USE_CUBLAS */>;
-
-DECLARE_GPU_SPEC(float);
-DECLARE_GPU_SPEC(Eigen::half);
-// DECLARE_GPU_SPEC(double);
-#undef DECLARE_GPU_SPEC
-}  // namespace functor
-
-#define REGISTER_GPU_KERNEL(T)                                             \
-  REGISTER_KERNEL_BUILDER(                                                 \
-      Name("LSTMBlockCellGrad").Device(DEVICE_GPU).TypeConstraint<T>("T"), \
-      LSTMBlockCellGradOp<GPUDevice, T, true>);
-
-REGISTER_GPU_KERNEL(float);
-REGISTER_GPU_KERNEL(Eigen::half);
-// REGISTER_GPU_KERNEL(double);
-#undef REGISTER_GPU_KERNEL
-#endif  // GOOGLE_CUDA
 
 }  // end namespace tensorflow
