@@ -364,16 +364,16 @@ void LSTMBlockCellBpropWithEigen(
   // di[t] = sigm'(i[t]) dcs[t] ci[t]
   di.device(d) = i * (i.constant(T(1)) - i) * dcs * ci;
 
-  // if(sparse_bprop)
-  // {
-  //   const float PERCENTAGE = 0.10;
-  //   make_sparse(di, PERCENTAGE);
-  //   make_sparse(dci, PERCENTAGE);
-  //   make_sparse(df, PERCENTAGE);
-  //   make_sparse(do_, PERCENTAGE);
+  if(sparse_bprop)
+  {
+    const float PERCENTAGE = 0.10;
+    make_sparse(di, PERCENTAGE);
+    make_sparse(dci, PERCENTAGE);
+    make_sparse(df, PERCENTAGE);
+    make_sparse(do_, PERCENTAGE);
 
-  //   // g_log << "Sparse bprop\n";
-  // }
+    // g_log << "Sparse bprop\n";
+  }
 
   dicfo.slice(cell.icfo_i_offsets(), cell.cell_extents()).device(d) = di;
   dicfo.slice(cell.icfo_c_offsets(), cell.cell_extents()).device(d) = dci;

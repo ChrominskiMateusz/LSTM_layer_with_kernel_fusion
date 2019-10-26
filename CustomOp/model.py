@@ -39,9 +39,10 @@ y=tf.compat.v1.placeholder("float",[batch_size,n_classes])
 input=tf.unstack(x ,time_steps,1)
 
 #defining the network
-#lstm_layer = rnn.LSTMBlockCell(num_units,forget_bias=1)
 
+#lstm_layer = rnn.LSTMBlockCell(num_units,forget_bias=1)
 lstm_layer = wrap.LSTMBlockCell(num_units,forget_bias=1, sparse_bprop=False)
+
 outputs, _ = rnn.static_rnn(lstm_layer,input,dtype="float32")
 
 #converting last output of dimension [batch_size,num_units] to [batch_size,n_classes] by out_weight multiplication
