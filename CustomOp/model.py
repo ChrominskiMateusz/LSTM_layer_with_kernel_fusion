@@ -15,7 +15,7 @@ mnist=input_data.read_data_sets("/tmp/data/",one_hot=True)
 #unrolled through 28 time steps
 time_steps=28
 #hidden LSTM units
-num_units=256
+num_units=128
 #rows of 28 pixels
 n_input=28
 #learning rate for adam
@@ -65,7 +65,7 @@ with tf.compat.v1.Session() as sess:
     iter=1
 
     start_time = time.time()
-    while iter<100:
+    while iter<1000:
         batch_x,batch_y=mnist.train.next_batch(batch_size=batch_size)
 
         batch_x=batch_x.reshape((batch_size,time_steps,n_input))

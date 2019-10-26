@@ -179,7 +179,7 @@ def _LSTMBlockCellGrad(op, *grad):
 
   # dicfo sparsification
 
-  # k = 60
+  # k = 102
   # values, indices = tf.nn.top_k(dicfo, k, sorted=False)
 
   # # Make values flat
@@ -196,11 +196,12 @@ def _LSTMBlockCellGrad(op, *grad):
   #         values=values,
   #         dense_shape=dicfo.shape)
 
-
   # unsparse_dicfo = tf.sparse.to_dense(sparse_dicfo)
 
   # Backprop from dicfo to xh.
   # xh_grad = tf.sparse.sparse_dense_matmul(sparse_dicfo, tf.transpose(w))
+
+  dicfo = tf.Print(dicfo, [dicfo], "DICFO: ", summarize=2)
 
   xh_grad = math_ops.matmul(dicfo, w, transpose_b=True)
   x_grad = array_ops.slice(xh_grad, (0, 0), (batch_size, input_size))
