@@ -39,30 +39,21 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
 
-
-void fill_vector (std::vector<int>& vec, const int& size)
-{
-  vec.reserve(size);
-
-  for (int i{}; i < size; i++)
-    vec.emplace_back (i);
-}
-
 template<typename T>
 void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, 
                   Eigen::Aligned> matrix, 
-                  std::vector<int> elements, 
                   const int group_size, 
                   const int start, const int end)
 {
-  for (int i{start}; i + group_size < end; i += group_size)
+  for (int i{start}, maks{}; i + group_size < end; i += group_size)
   {
-    std::sort (elements.begin (), elements.end (), [&matrix, i](int a, int b) {
-      return fabs (float (matrix.data ()[i + a])) > fabs (float (matrix.data ()[i + b]));
-    });
-
     for (int j{1}; j < group_size; j++)
-      matrix.data ()[i + elements[j]] = (T)NULL;
+      if (fabs (float (matrix.data ()[i + j])) > fabs (float (matrix.data ()[i + j - 1])))
+        maks = j;
+
+    for (int j{}; j < group_size; j++)
+      if (j != maks)
+        matrix.data ()[i + j] = (T)NULL;
   }
 }
 
@@ -361,27 +352,31 @@ void LSTMBlockCellBpropWithEigen(
 
   const int START = 0;
   const int GROUP_SIZE = 5;
-  std::vector<int> elements;
-  fill_vector (elements, GROUP_SIZE);
   
-  std::thread di_thread (&make_sparse<T>, di, elements, GROUP_SIZE, START, di.size () / 2);  
-  std::thread di_thread2 (&make_sparse<T>, di, elements, GROUP_SIZE, di.size () / 2, di.size ());  
-  std::thread dci_thread (&make_sparse<T>, dci, elements, GROUP_SIZE, START, dci.size () / 2);
-  std::thread dci_thread2 (&make_sparse<T>, dci, elements, GROUP_SIZE, dci.size () / 2, dci.size ());
-  std::thread df_thread (&make_sparse<T>, df, elements, GROUP_SIZE, START, df.size () / 2);
-  std::thread df_thread2 (&make_sparse<T>, df, elements, GROUP_SIZE, df.size () / 2, df.size ());
-  std::thread do__thread (&make_sparse<T>, do_, elements, GROUP_SIZE, START, do_.size () / 2);
-  std::thread do__thread2 (&make_sparse<T>, do_, elements, GROUP_SIZE, do_.size () / 2, do_.size ());
+  std::thread di_thread (&make_sparse<T>, di, GROUP_SIZE, START, di.size () / 2);
+  std::thread di_thread2 (&make_sparse<T>, di, GROUP_SIZE, di.size () / 2, di.size ());
+
+  std::thread dci_thread (&make_sparse<T>, dci, GROUP_SIZE, START, dci.size () / 2);
+  std::thread dci_thread2 (&make_sparse<T>, dci, GROUP_SIZE, dci.size () / 2, dci.size ());
+
+  std::thread df_thread (&make_sparse<T>, df, GROUP_SIZE, START, df.size () / 2);
+  std::thread df_thread2 (&make_sparse<T>, df, GROUP_SIZE, df.size () / 2, df.size ());
+  
+  std::thread do__thread (&make_sparse<T>, do_, GROUP_SIZE, START, do_.size () / 2);
+  std::thread do__thread2 (&make_sparse<T>, do_, GROUP_SIZE, do_.size () / 2, do_.size ());
   
   di_thread.join ();
   di_thread2.join ();
   dicfo.slice(cell.icfo_i_offsets(), cell.cell_extents()).device(d) = di;
+
   dci_thread.join ();
   dci_thread2.join ();
   dicfo.slice(cell.icfo_c_offsets(), cell.cell_extents()).device(d) = dci;
+
   df_thread.join ();
   df_thread2.join ();
   dicfo.slice(cell.icfo_f_offsets(), cell.cell_extents()).device(d) = df;
+
   do__thread.join ();
   do__thread2.join ();
   dicfo.slice(cell.icfo_o_offsets(), cell.cell_extents()).device(d) = do_;
