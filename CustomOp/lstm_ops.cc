@@ -24,6 +24,10 @@ limitations under the License.
 #include <memory>
 #include <vector>
 #include <iostream>
+// temp includes
+#include <fstream>
+#include <string>
+#include "tensorflow/core/lib/gtl/top_n.h"
 
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/op_kernel.h"
@@ -37,8 +41,10 @@ limitations under the License.
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
 
+// std::string g_fname = "log.bin";
+// std::fstream g_log(g_fname, g_log.binary | g_log.trunc | g_log.in | g_log.out);
 
-void fill_vector (std::vector<int>& vec, const int& size)
+inline void fill_vector (std::vector<int>& vec, const int& size)
 {
   vec.reserve(size);
 
@@ -47,9 +53,9 @@ void fill_vector (std::vector<int>& vec, const int& size)
 }
 
 template<typename T>
-void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, 
-                  Eigen::Aligned> matrix, 
-                  const float& percentage)
+inline void make_sparse (
+              Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix,
+              const float& percentage)
 {
   std::vector<int> elements;
   fill_vector (elements, matrix.size ());
@@ -87,6 +93,7 @@ REGISTER_OP("LSTMBlockCellOur")
     .Attr("forget_bias: float = 1.0")
     .Attr("cell_clip: float = 3.0")
     .Attr("use_peephole: bool = false")
+    .Attr("sparse_bprop: bool = false")
     .Attr("T: {half, float}")
     .SetShapeFn([](InferenceContext* c) {
       ShapeHandle x, cs_prev;
@@ -174,6 +181,7 @@ REGISTER_OP("LSTMBlockCellGradOur")
     .Output("wcf_grad: T")
     .Output("wco_grad: T")
     .Attr("use_peephole: bool")
+    .Attr("sparse_bprop: bool")
     .Attr("T: {half, float}")
     .SetShapeFn([](InferenceContext* c) {
       ShapeHandle x, cs_prev;
@@ -236,7 +244,7 @@ namespace functor {
 template <typename T>
 void LSTMBlockCellFpropWithEigen(
     const LSTMBlockCell& cell, OpKernelContext* ctx, const CPUDevice& d,
-    const float forget_bias, const float cell_clip, bool use_peephole,
+    const float forget_bias, const float cell_clip, bool use_peephole, bool sparse_bprop,
     typename TTypes<T>::ConstMatrix x, typename TTypes<T>::ConstMatrix cs_prev,
     typename TTypes<T>::ConstMatrix h_prev, typename TTypes<T>::ConstMatrix w,
     typename TTypes<T>::ConstVec wci, typename TTypes<T>::ConstVec wcf,
@@ -317,7 +325,8 @@ void LSTMBlockCellFpropWithEigen(
 template <typename Device, typename T, bool USE_CUBLAS>
 void LSTMBlockCellBpropWithEigen(
     const LSTMBlockCell& cell, OpKernelContext* ctx, const Device& d,
-    bool use_peephole, typename TTypes<T>::ConstMatrix x,
+    bool use_peephole, bool sparse_bprop,
+    typename TTypes<T>::ConstMatrix x,
     typename TTypes<T>::ConstMatrix cs_prev,
     typename TTypes<T>::ConstMatrix h_prev, typename TTypes<T>::ConstMatrix w,
     typename TTypes<T>::ConstVec wci, typename TTypes<T>::ConstVec wcf,
@@ -355,11 +364,16 @@ void LSTMBlockCellBpropWithEigen(
   // di[t] = sigm'(i[t]) dcs[t] ci[t]
   di.device(d) = i * (i.constant(T(1)) - i) * dcs * ci;
 
-  const float PERCENTAGE = 0.20;
-  make_sparse(di, PERCENTAGE);
-  make_sparse(dci, PERCENTAGE);
-  make_sparse(df, PERCENTAGE);
-  make_sparse(do_, PERCENTAGE);
+  // if(sparse_bprop)
+  // {
+  //   const float PERCENTAGE = 0.10;
+  //   make_sparse(di, PERCENTAGE);
+  //   make_sparse(dci, PERCENTAGE);
+  //   make_sparse(df, PERCENTAGE);
+  //   make_sparse(do_, PERCENTAGE);
+
+  //   // g_log << "Sparse bprop\n";
+  // }
 
   dicfo.slice(cell.icfo_i_offsets(), cell.cell_extents()).device(d) = di;
   dicfo.slice(cell.icfo_c_offsets(), cell.cell_extents()).device(d) = dci;
@@ -381,7 +395,7 @@ void LSTMBlockCellBpropWithEigen(
   template <>                                                                 \
   void LSTMBlockCellFprop<CPUDevice, T, false /* USE_CUBLAS */>::operator()(  \
       OpKernelContext* ctx, const CPUDevice& d, const float forget_bias,      \
-      const float cell_clip, bool use_peephole,                               \
+      const float cell_clip, bool use_peephole, bool sparse_bprop,            \
       typename TTypes<T>::ConstMatrix x,                                      \
       typename TTypes<T>::ConstMatrix cs_prev,                                \
       typename TTypes<T>::ConstMatrix h_prev,                                 \
@@ -393,12 +407,14 @@ void LSTMBlockCellBpropWithEigen(
       typename TTypes<T>::Matrix ci, typename TTypes<T>::Matrix co,           \
       typename TTypes<T>::Matrix icfo, typename TTypes<T>::Matrix h) {        \
     LSTMBlockCellFpropWithEigen<T>(                                           \
-        *this, ctx, d, forget_bias, cell_clip, use_peephole, x, cs_prev,      \
+        *this, ctx, d, forget_bias, cell_clip, use_peephole, sparse_bprop,    \
+        x, cs_prev,                                                           \
         h_prev, w, wci, wcf, wco, b, xh, i, cs, f, o, ci, co, icfo, h);       \
   }                                                                           \
   template <>                                                                 \
   void LSTMBlockCellBprop<CPUDevice, T, false /* USE_CUBLAS */>::operator()(  \
-      OpKernelContext* ctx, const CPUDevice& d, bool use_peephole,            \
+      OpKernelContext* ctx, const CPUDevice& d,                               \
+      bool use_peephole, bool sparse_bprop,                                   \
       typename TTypes<T>::ConstMatrix x,                                      \
       typename TTypes<T>::ConstMatrix cs_prev,                                \
       typename TTypes<T>::ConstMatrix h_prev,                                 \
@@ -417,7 +433,8 @@ void LSTMBlockCellBpropWithEigen(
       typename TTypes<T>::Vec wci_grad, typename TTypes<T>::Vec wcf_grad,     \
       typename TTypes<T>::Vec wco_grad) {                                     \
     LSTMBlockCellBpropWithEigen<CPUDevice, T, false /* USE_CUBLAS */>(        \
-        *this, ctx, d, use_peephole, x, cs_prev, h_prev, w, wci, wcf, wco, b, \
+        *this, ctx, d, use_peephole, sparse_bprop,                            \
+        x, cs_prev, h_prev, w, wci, wcf, wco, b,                              \
         i, cs, f, o, ci, co, cs_grad, h_grad, do_, dcs, dci, df, di, dicfo,   \
         cs_prev_grad, wci_grad, wcf_grad, wco_grad);                          \
   }                                                                           \
@@ -437,11 +454,10 @@ class LSTMBlockCellOp : public OpKernel {
     OP_REQUIRES_OK(ctx, ctx->GetAttr("forget_bias", &forget_bias_));
     OP_REQUIRES_OK(ctx, ctx->GetAttr("cell_clip", &cell_clip_));
     OP_REQUIRES_OK(ctx, ctx->GetAttr("use_peephole", &use_peephole_));
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("sparse_bprop", &sparse_bprop_));
   }
 
   void Compute(OpKernelContext* ctx) override {
-
-    //std::cout << "No czesc tutaj forward prop\n";
 
     const Tensor* x_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("x", &x_tensor));
@@ -557,7 +573,7 @@ class LSTMBlockCellOp : public OpKernel {
 
     functor::LSTMBlockCellFprop<Device, T, USE_CUBLAS>(batch_size, input_size,
                                                        cell_size)(
-        ctx, device, forget_bias_, cell_clip_, use_peephole_,
+        ctx, device, forget_bias_, cell_clip_, use_peephole_, sparse_bprop_,
         x_tensor->matrix<T>(), cs_prev_tensor->matrix<T>(),
         h_prev_tensor->matrix<T>(), w_tensor->matrix<T>(), wci_tensor->vec<T>(),
         wcf_tensor->vec<T>(), wco_tensor->vec<T>(), b_tensor->vec<T>(),
@@ -570,6 +586,7 @@ class LSTMBlockCellOp : public OpKernel {
   float forget_bias_;
   float cell_clip_;
   bool use_peephole_;
+  bool sparse_bprop_;
 };
 
 #define REGISTER_KERNEL(T)                                             \
@@ -621,6 +638,7 @@ class LSTMBlockCellGradOp : public OpKernel {
  public:
   explicit LSTMBlockCellGradOp(OpKernelConstruction* ctx) : OpKernel(ctx) {
     OP_REQUIRES_OK(ctx, ctx->GetAttr("use_peephole", &use_peephole_));
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("sparse_bprop", &sparse_bprop_));
   }
 
   void Compute(OpKernelContext* ctx) override {
@@ -842,7 +860,7 @@ class LSTMBlockCellGradOp : public OpKernel {
 
     functor::LSTMBlockCellBprop<Device, T, USE_CUBLAS>(batch_size, input_size,
                                                        cell_size)(
-        ctx, device, use_peephole_, x_tensor->matrix<T>(),
+        ctx, device, use_peephole_, sparse_bprop_, x_tensor->matrix<T>(),
         cs_prev_tensor->matrix<T>(), h_prev_tensor->matrix<T>(),
         w_tensor->matrix<T>(), wci_tensor->vec<T>(), wcf_tensor->vec<T>(),
         wco_tensor->vec<T>(), b_tensor->vec<T>(), i_tensor->matrix<T>(),
@@ -857,6 +875,7 @@ class LSTMBlockCellGradOp : public OpKernel {
 
  protected:
   bool use_peephole_;
+  bool sparse_bprop_;
 };
 
 #define REGISTER_KERNEL(T)                                                 \

@@ -49,6 +49,7 @@ def _lstm_block_cell(x,
                      forget_bias=None,
                      cell_clip=None,
                      use_peephole=None,
+                     sparse_bprop=None,
                      name=None):
   r"""Computes the LSTM cell forward propagation for 1 time step.
 
@@ -133,6 +134,7 @@ def _lstm_block_cell(x,
       forget_bias=forget_bias,
       cell_clip=cell_clip if cell_clip is not None else -1,
       use_peephole=use_peephole,
+      sparse_bprop=sparse_bprop,
       name=name)
   # pylint: enable=protected-access
 
@@ -172,20 +174,47 @@ def _LSTMBlockCellGrad(op, *grad):
        co,
        cs_grad,
        h_grad,
-       use_peephole=op.get_attr("use_peephole"))
+       use_peephole=op.get_attr("use_peephole"),
+       sparse_bprop=op.get_attr("sparse_bprop"))
+
+  # dicfo sparsification
+
+  # k = 60
+  # values, indices = tf.nn.top_k(dicfo, k, sorted=False)
+
+  # # Make values flat
+  # values = tf.reshape(values, [-1])
+
+  # my_range = tf.expand_dims(tf.range(0, indices.get_shape()[0]), 1)
+  # my_range_repeated = tf.tile(my_range, [1, k])
+
+  # full_indices = tf.concat([tf.expand_dims(my_range_repeated, 2), tf.expand_dims(indices, 2)], axis=2)
+  # full_indices = tf.reshape(full_indices, [-1, 2])
+
+  # sparse_dicfo = tf.SparseTensor(
+  #         indices=tf.cast(full_indices, dtype=tf.int64),
+  #         values=values,
+  #         dense_shape=dicfo.shape)
+
+
+  # unsparse_dicfo = tf.sparse.to_dense(sparse_dicfo)
 
   # Backprop from dicfo to xh.
-  xh_grad = math_ops.matmul(dicfo, w, transpose_b=True)
+  # xh_grad = tf.sparse.sparse_dense_matmul(sparse_dicfo, tf.transpose(w))
 
+  xh_grad = math_ops.matmul(dicfo, w, transpose_b=True)
   x_grad = array_ops.slice(xh_grad, (0, 0), (batch_size, input_size))
   x_grad.get_shape().merge_with(x.get_shape())
 
-  h_prev_grad = array_ops.slice(xh_grad, (0, input_size),
-                                (batch_size, cell_size))
+  h_prev_grad = array_ops.slice(xh_grad, (0, input_size),(batch_size, cell_size))
   h_prev_grad.get_shape().merge_with(h_prev.get_shape())
 
   # Backprop from dicfo to w.
   xh = array_ops.concat([x, h_prev], 1)
+
+  # w_grad = tf.sparse.sparse_dense_matmul(sparse_dicfo, xh)
+  # w_grad = math_ops.matmul(xh, unsparse_dicfo, transpose_a=True, b_is_sparse=True)
+
   w_grad = math_ops.matmul(xh, dicfo, transpose_a=True)
   w_grad.get_shape().merge_with(w.get_shape())
 
@@ -215,6 +244,7 @@ class LSTMBlockCell(LayerRNNCell):
                forget_bias=1.0,
                cell_clip=None,
                use_peephole=False,
+               sparse_bprop=False,
                dtype=None,
                reuse=None,
                name="lstm_cell"):
@@ -241,6 +271,7 @@ class LSTMBlockCell(LayerRNNCell):
     self._num_units = num_units
     self._forget_bias = forget_bias
     self._use_peephole = use_peephole
+    self._sparse_bprop = sparse_bprop
     self._cell_clip = cell_clip if cell_clip is not None else -1
     self._names = {
         "W": "kernel",
@@ -302,7 +333,8 @@ class LSTMBlockCell(LayerRNNCell):
         wco=wco,
         forget_bias=self._forget_bias,
         cell_clip=self._cell_clip,
-        use_peephole=self._use_peephole)
+        use_peephole=self._use_peephole,
+        sparse_bprop=self._sparse_bprop)
 
     new_state = rnn_cell_impl.LSTMStateTuple(cs, h)
     return h, new_state

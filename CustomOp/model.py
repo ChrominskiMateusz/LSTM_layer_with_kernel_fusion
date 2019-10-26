@@ -15,7 +15,7 @@ mnist=input_data.read_data_sets("/tmp/data/",one_hot=True)
 #unrolled through 28 time steps
 time_steps=28
 #hidden LSTM units
-num_units=128
+num_units=256
 #rows of 28 pixels
 n_input=28
 #learning rate for adam
@@ -31,9 +31,9 @@ out_bias=tf.Variable(tf.random.normal([n_classes]))
 
 #defining placeholders
 #input image placeholder
-x=tf.compat.v1.placeholder("float",[None,time_steps,n_input])
+x=tf.compat.v1.placeholder("float",[batch_size,time_steps,n_input])
 #input label placeholder
-y=tf.compat.v1.placeholder("float",[None,n_classes])
+y=tf.compat.v1.placeholder("float",[batch_size,n_classes])
 
 #processing the input tensor from [batch_size,n_steps,n_input] to "time_steps" number of [batch_size,n_input] tensors
 input=tf.unstack(x ,time_steps,1)
@@ -41,7 +41,7 @@ input=tf.unstack(x ,time_steps,1)
 #defining the network
 #lstm_layer = rnn.LSTMBlockCell(num_units,forget_bias=1)
 
-lstm_layer = wrap.LSTMBlockCell(num_units,forget_bias=1)
+lstm_layer = wrap.LSTMBlockCell(num_units,forget_bias=1, sparse_bprop=False)
 outputs, _ = rnn.static_rnn(lstm_layer,input,dtype="float32")
 
 #converting last output of dimension [batch_size,num_units] to [batch_size,n_classes] by out_weight multiplication
@@ -64,7 +64,7 @@ with tf.compat.v1.Session() as sess:
     iter=1
 
     start_time = time.time()
-    while iter<100000:
+    while iter<100:
         batch_x,batch_y=mnist.train.next_batch(batch_size=batch_size)
 
         batch_x=batch_x.reshape((batch_size,time_steps,n_input))
@@ -80,6 +80,6 @@ with tf.compat.v1.Session() as sess:
             print("__________________")
 
         iter=iter+1
-    
+
     duration = time.time() - start_time
     print(duration)

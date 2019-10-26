@@ -155,7 +155,8 @@ struct LSTMBlockCellFprop : public LSTMBlockCell {
 
   void operator()(OpKernelContext* ctx, const Device& d,
                   const float forget_bias, const float cell_clip,
-                  bool use_peephole, typename TTypes<T>::ConstMatrix x,
+                  bool use_peephole, bool sparse_bprop,
+                  typename TTypes<T>::ConstMatrix x,
                   typename TTypes<T>::ConstMatrix cs_prev,
                   typename TTypes<T>::ConstMatrix h_prev,
                   typename TTypes<T>::ConstMatrix w,
@@ -179,7 +180,7 @@ struct LSTMBlockCellBprop : public LSTMBlockCell {
       : LSTMBlockCell(batch_size, input_size, cell_size) {}
 
   void operator()(
-      OpKernelContext* ctx, const Device& d, bool use_peephole,
+      OpKernelContext* ctx, const Device& d, bool use_peephole, bool sparse_bprop,
       typename TTypes<T>::ConstMatrix x,
       typename TTypes<T>::ConstMatrix cs_prev,
       typename TTypes<T>::ConstMatrix h_prev, typename TTypes<T>::ConstMatrix w,
