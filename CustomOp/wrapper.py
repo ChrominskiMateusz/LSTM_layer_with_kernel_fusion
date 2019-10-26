@@ -174,8 +174,11 @@ def _LSTMBlockCellGrad(op, *grad):
        h_grad,
        use_peephole=op.get_attr("use_peephole"))
 
+  sparse_dicfo = tf.SparseTensor(indices, values, dicfo.shape)
+  xh_grad = tf.sparse.sparse_dense_matmul(sparse_dicfo, tf.transpose(w))
+
   # Backprop from dicfo to xh.
-  xh_grad = math_ops.matmul(dicfo, w, transpose_b=True)
+  # xh_grad = math_ops.matmul(dicfo, w, transpose_b=True)
 
   x_grad = array_ops.slice(xh_grad, (0, 0), (batch_size, input_size))
   x_grad.get_shape().merge_with(x.get_shape())
@@ -186,7 +189,7 @@ def _LSTMBlockCellGrad(op, *grad):
 
   # Backprop from dicfo to w.
   xh = array_ops.concat([x, h_prev], 1)
-  w_grad = math_ops.matmul(xh, dicfo, transpose_a=True)
+  w_grad = math_ops.matmul(xh, dicfo, transpose_a=True, b_is_sparse=True)
   w_grad.get_shape().merge_with(w.get_shape())
 
   # Backprop from dicfo to b.

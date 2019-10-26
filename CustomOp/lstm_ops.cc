@@ -22,7 +22,6 @@ limitations under the License.
 #include "lstm_ops.h"
 
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <vector>
 #include <thread>
@@ -46,7 +45,7 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
                   const int start, const int end)
 {
   int max;
-  for (int i{start}; i + group_size < end; i += group_size)
+  for (int i{start}; i + group_size <= end; i += group_size)
   {
     max = 0;
     
@@ -193,9 +192,9 @@ REGISTER_OP("LSTMBlockCellGradOur")
       c->set_output(4, cell_size_vec);
 
       // Our Outputs
-      // elements_left = 100;
-      c->set_output(5, c->Vector(100));
-      c->set_output(6, c->Matrix(100, 2));
+      // elements_left = 4096;
+      c->set_output(5, c->Vector(4096));
+      c->set_output(6, c->Matrix(4096, 2));
       return tensorflow::Status::OK();
     })
     .Doc(R"doc(
@@ -363,7 +362,7 @@ void LSTMBlockCellBpropWithEigen(
   di.device(d) = i * (i.constant(T(1)) - i) * dcs * ci;
 
   const int START = 0;
-  const int GROUP_SIZE = 5;
+  const int GROUP_SIZE = 16;
   
   std::thread di_thread (&make_sparse<T>, di, GROUP_SIZE, START, di.size () / 2);
   std::thread di_thread2 (&make_sparse<T>, di, GROUP_SIZE, di.size () / 2, di.size ());
@@ -392,6 +391,21 @@ void LSTMBlockCellBpropWithEigen(
   do__thread.join ();
   do__thread2.join ();
   dicfo.slice(cell.icfo_o_offsets(), cell.cell_extents()).device(d) = do_;
+
+  uint64 count = 0;
+  for(int64 i=0; i < cell.batch_size(); i++)
+  {
+    for(int64 j=0; j < cell.cell_size() * 4; j++)
+    {
+      if(dicfo(i, j) != static_cast<T>(0))
+      {
+        values(count) = dicfo(i, j);
+        indices(count, 0) = i;
+        indices(count, 1) = j;
+        ++count;
+      }
+    }
+  }
 
   cs_prev_grad.device(d) = dcs * f;
   if (use_peephole) {
@@ -469,9 +483,6 @@ class LSTMBlockCellOp : public OpKernel {
   }
 
   void Compute(OpKernelContext* ctx) override {
-
-    //std::cout << "No czesc tutaj forward prop\n";
-
     const Tensor* x_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("x", &x_tensor));
 
@@ -844,6 +855,10 @@ class LSTMBlockCellGradOp : public OpKernel {
     functor::TensorZero<Device, T>()(device, wcf_grad_tensor->flat<T>());
     functor::TensorZero<Device, T>()(device, wco_grad_tensor->flat<T>());
 
+    // Zeroing our outputs
+    functor::TensorZero<Device, T>()(device, values_tensor->flat<T>());
+    functor::TensorZero<Device, int64>()(device, indices_tensor->flat<int64>());
+
     functor::LSTMBlockCellBprop<Device, T, USE_CUBLAS>(batch_size, input_size,
                                                        cell_size)(
         ctx, device, use_peephole_, x_tensor->matrix<T>(),
@@ -863,7 +878,7 @@ class LSTMBlockCellGradOp : public OpKernel {
 
  protected:
   bool use_peephole_;
-  const int elements_left = 100;
+  const int elements_left = 4096;
 };
 
 #define REGISTER_KERNEL(T)                                                 \
