@@ -45,10 +45,13 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
                   const int group_size, 
                   const int start, const int end)
 {
-  for (int i{start}, max{}; i + group_size < end; i += group_size)
+  int max;
+  for (int i{start}; i + group_size < end; i += group_size)
   {
+    max = 0;
+    
     for (int j{1}; j < group_size; j++)
-      if (fabs (float (matrix.data ()[i + j])) > fabs (float (matrix.data ()[i + j - 1])))
+      if (fabs (float (matrix.data ()[i + max])) < fabs (float (matrix.data ()[i + j])))
         max = j;
 
     for (int j{}; j < group_size; j++)
