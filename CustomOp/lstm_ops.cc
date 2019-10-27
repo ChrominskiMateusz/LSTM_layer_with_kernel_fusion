@@ -22,6 +22,7 @@ limitations under the License.
 #include "lstm_ops.h"
 
 #include <functional>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -46,10 +47,10 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
                   const int start, const int end)
 {
   int max;
-  for (int i{start}; i + group_size < end; i += group_size)
+  for (int i{start}; i + group_size <= end; i += group_size)
   {
     max = 0;
-    
+
     for (int j{1}; j < group_size; j++)
       if (fabs (float (matrix.data ()[i + max])) < fabs (float (matrix.data ()[i + j])))
         max = j;
@@ -363,7 +364,7 @@ void LSTMBlockCellBpropWithEigen(
   di.device(d) = i * (i.constant(T(1)) - i) * dcs * ci;
 
   const int START = 0;
-  const int GROUP_SIZE = 5;
+  const int GROUP_SIZE = 8;
   
   std::thread di_thread (&make_sparse<T>, di, GROUP_SIZE, START, di.size () / 2);
   std::thread di_thread2 (&make_sparse<T>, di, GROUP_SIZE, di.size () / 2, di.size ());
@@ -392,6 +393,37 @@ void LSTMBlockCellBpropWithEigen(
   do__thread.join ();
   do__thread2.join ();
   dicfo.slice(cell.icfo_o_offsets(), cell.cell_extents()).device(d) = do_;
+
+  // int ile{};
+  // int count{};
+  // for (int i{}; i < dicfo.size (); i++)
+  // {
+  //   if (dicfo.data ()[i] == (T)0)
+  //   {
+  //     ile++;
+  //   }
+  //   else
+  //   {
+  //     ile = 0;
+  //   }
+  //   if (ile == 16)
+  //   {
+  //     count++;
+  //     ile = 0;
+  //   }
+    
+  // }
+  // std::cout << count << std::endl;
+  // std::ofstream plik;
+  // plik.open ("DUPA.txt");
+  // plik << dicfo;
+  // plik.close ();
+
+  // int count{};
+  // for (int i{}; i < dicfo.size (); i++)
+  //   if (dicfo.data() [i] != (T)0)
+  //     count++;
+  // std::cout << dicfo.size () << " " << count << std::endl;
 
   cs_prev_grad.device(d) = dcs * f;
   if (use_peephole) {
