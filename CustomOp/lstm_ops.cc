@@ -22,6 +22,7 @@ limitations under the License.
 #include "lstm_ops.h"
 
 #include <functional>
+#include <fstream>
 #include <memory>
 #include <vector>
 #include <thread>
@@ -42,9 +43,14 @@ template<typename T>
 void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, 
                   Eigen::Aligned> matrix, 
                   const int group_size, 
-                  const int start, const int end)
+                  const int start, const int end,
+                  Eigen::TensorMap<Eigen::Tensor<long long, 2, Eigen::RowMajor, Eigen::DenseIndex>,
+                  Eigen::Aligned> indices,
+                  Eigen::TensorMap<Eigen::Tensor<T, 1, Eigen::RowMajor, Eigen::DenseIndex>,
+                  Eigen::Aligned> values,
+                  const int part)
 {
-  int max;
+  int max, x, y, counter{part * 128 * 64 / group_size};
   for (int i{start}; i + group_size <= end; i += group_size)
   {
     max = 0;
@@ -56,6 +62,15 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
     for (int j{}; j < group_size; j++)
       if (j != max)
         matrix.data ()[i + j] = (T)NULL;
+
+    y = (i + max) / 128;
+    x = i + max - (y * 128);
+
+    values(counter) = matrix(x, y);
+    indices(counter, 0) = x;
+    indices(counter, 1) = y;
+    
+    counter++;
   }
 }
 
@@ -363,19 +378,19 @@ void LSTMBlockCellBpropWithEigen(
 
   const int START = 0;
   const int GROUP_SIZE = 16;
-  
-  std::thread di_thread (&make_sparse<T>, di, GROUP_SIZE, START, di.size () / 2);
-  std::thread di_thread2 (&make_sparse<T>, di, GROUP_SIZE, di.size () / 2, di.size ());
 
-  std::thread dci_thread (&make_sparse<T>, dci, GROUP_SIZE, START, dci.size () / 2);
-  std::thread dci_thread2 (&make_sparse<T>, dci, GROUP_SIZE, dci.size () / 2, dci.size ());
+  std::thread di_thread (&make_sparse<T>, di, GROUP_SIZE, START, di.size () / 2, indices, values, 0);
+  std::thread di_thread2 (&make_sparse<T>, di, GROUP_SIZE, di.size () / 2, di.size (), indices, values, 1);
 
-  std::thread df_thread (&make_sparse<T>, df, GROUP_SIZE, START, df.size () / 2);
-  std::thread df_thread2 (&make_sparse<T>, df, GROUP_SIZE, df.size () / 2, df.size ());
+  std::thread dci_thread (&make_sparse<T>, dci, GROUP_SIZE, START, dci.size () / 2, indices, values, 2);
+  std::thread dci_thread2 (&make_sparse<T>, dci, GROUP_SIZE, dci.size () / 2, dci.size (), indices, values, 3);
+
+  std::thread df_thread (&make_sparse<T>, df, GROUP_SIZE, START, df.size () / 2, indices, values, 4);
+  std::thread df_thread2 (&make_sparse<T>, df, GROUP_SIZE, df.size () / 2, df.size (), indices, values, 5);
   
-  std::thread do__thread (&make_sparse<T>, do_, GROUP_SIZE, START, do_.size () / 2);
-  std::thread do__thread2 (&make_sparse<T>, do_, GROUP_SIZE, do_.size () / 2, do_.size ());
-  
+  std::thread do__thread (&make_sparse<T>, do_, GROUP_SIZE, START, do_.size () / 2, indices, values, 6);
+  std::thread do__thread2 (&make_sparse<T>, do_, GROUP_SIZE, do_.size () / 2, do_.size (), indices, values, 7);
+
   di_thread.join ();
   di_thread2.join ();
   dicfo.slice(cell.icfo_i_offsets(), cell.cell_extents()).device(d) = di;
@@ -392,20 +407,25 @@ void LSTMBlockCellBpropWithEigen(
   do__thread2.join ();
   dicfo.slice(cell.icfo_o_offsets(), cell.cell_extents()).device(d) = do_;
 
-  uint64 count = 0;
-  for(int64 i=0; i < cell.batch_size(); i++)
-  {
-    for(int64 j=0; j < cell.cell_size() * 4; j++)
-    {
-      if(dicfo(i, j) != static_cast<T>(0))
-      {
-        values(count) = dicfo(i, j);
-        indices(count, 0) = i;
-        indices(count, 1) = j;
-        ++count;
-      }
-    }
-  }
+  std::ofstream plik;
+  plik.open ("values.txt");
+  plik << values;
+  plik.close ();
+
+  // uint64 count = 0;
+  // for(int64 i=0; i < cell.batch_size(); i++)
+  // {
+  //   for(int64 j=0; j < cell.cell_size() * 4; j++)
+  //   {
+  //     if(dicfo(i, j) != static_cast<T>(0))
+  //     {
+  //       values(count) = dicfo(i, j);
+  //       indices(count, 0) = i;
+  //       indices(count, 1) = j;
+  //       ++count;
+  //     }
+  //   }
+  // }
 
   cs_prev_grad.device(d) = dcs * f;
   if (use_peephole) {
