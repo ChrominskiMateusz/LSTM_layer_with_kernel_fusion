@@ -50,7 +50,10 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
                   Eigen::Aligned> values,
                   const int part)
 {
-  int max, x, y, counter{part * 128 * 64 / group_size};
+  int max, x, y, 
+      counter{part * 128 * 64 / group_size},
+      offset{part % 2 ? part - 1 : part};
+  offset /= 2;
   for (int i{start}; i + group_size <= end; i += group_size)
   {
     max = 0;
@@ -66,9 +69,9 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
     y = (i + max) / 128;
     x = i + max - (y * 128);
 
-    values(counter) = matrix(x, y);
+    values(counter) = matrix.data ()[i + max];
     indices(counter, 0) = x;
-    indices(counter, 1) = y;
+    indices(counter, 1) = y + offset * 128;
     
     counter++;
   }
@@ -378,6 +381,12 @@ void LSTMBlockCellBpropWithEigen(
 
   const int START = 0;
   const int GROUP_SIZE = 16;
+  
+  std::ofstream plik;
+
+  plik.open ("cs_prev.txt");
+  plik << cs_prev;
+  plik.close ();
 
   std::thread di_thread (&make_sparse<T>, di, GROUP_SIZE, START, di.size () / 2, indices, values, 0);
   std::thread di_thread2 (&make_sparse<T>, di, GROUP_SIZE, di.size () / 2, di.size (), indices, values, 1);
@@ -407,10 +416,10 @@ void LSTMBlockCellBpropWithEigen(
   do__thread2.join ();
   dicfo.slice(cell.icfo_o_offsets(), cell.cell_extents()).device(d) = do_;
 
-  std::ofstream plik;
-  plik.open ("values.txt");
-  plik << values;
-  plik.close ();
+  // std::ofstream plik2;
+  // plik2.open ("values.txt");
+  // plik2 << values;
+  // plik2.close ();
 
   // uint64 count = 0;
   // for(int64 i=0; i < cell.batch_size(); i++)
