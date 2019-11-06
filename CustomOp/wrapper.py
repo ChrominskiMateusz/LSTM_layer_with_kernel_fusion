@@ -177,33 +177,36 @@ def _LSTMBlockCellGrad(op, *grad):
        use_peephole=op.get_attr("use_peephole"),
        sparse_bprop=op.get_attr("sparse_bprop"))
 
-  # dicfo sparsification
+  sparse_bprop=op.get_attr("sparse_bprop")
 
-  # k = 102
-  # values, indices = tf.nn.top_k(dicfo, k, sorted=False)
+  if sparse_bprop:
+    # dicfo sparsification
+    k = 102
+    values, indices = tf.nn.top_k(dicfo, k, sorted=False)
 
-  # # Make values flat
-  # values = tf.reshape(values, [-1])
+    # Make values flat
+    values = tf.reshape(values, [-1])
 
-  # my_range = tf.expand_dims(tf.range(0, indices.get_shape()[0]), 1)
-  # my_range_repeated = tf.tile(my_range, [1, k])
+    my_range = tf.expand_dims(tf.range(0, indices.get_shape()[0]), 1)
+    my_range_repeated = tf.tile(my_range, [1, k])
 
-  # full_indices = tf.concat([tf.expand_dims(my_range_repeated, 2), tf.expand_dims(indices, 2)], axis=2)
-  # full_indices = tf.reshape(full_indices, [-1, 2])
+    full_indices = tf.concat([tf.expand_dims(my_range_repeated, 2), tf.expand_dims(indices, 2)], axis=2)
+    full_indices = tf.reshape(full_indices, [-1, 2])
 
-  # sparse_dicfo = tf.SparseTensor(
-  #         indices=tf.cast(full_indices, dtype=tf.int64),
-  #         values=values,
-  #         dense_shape=dicfo.shape)
+    sparse_dicfo = tf.SparseTensor(
+            indices=tf.cast(full_indices, dtype=tf.int64),
+            values=values,
+            dense_shape=dicfo.shape)
 
-  # unsparse_dicfo = tf.sparse.to_dense(sparse_dicfo)
+    xh_grad = tf.sparse.sparse_dense_matmul(sparse_dicfo, w, adjoint_b=True)
+
 
   # Backprop from dicfo to xh.
-  # xh_grad = tf.sparse.sparse_dense_matmul(sparse_dicfo, tf.transpose(w))
+  #dicfo = tf.Print(dicfo, [dicfo], "DICFO: ", summarize=2)
 
-  dicfo = tf.Print(dicfo, [dicfo], "DICFO: ", summarize=2)
+  if sparse_bprop == False:
+    xh_grad = math_ops.matmul(dicfo, w, transpose_b=True)
 
-  xh_grad = math_ops.matmul(dicfo, w, transpose_b=True)
   x_grad = array_ops.slice(xh_grad, (0, 0), (batch_size, input_size))
   x_grad.get_shape().merge_with(x.get_shape())
 
@@ -212,9 +215,6 @@ def _LSTMBlockCellGrad(op, *grad):
 
   # Backprop from dicfo to w.
   xh = array_ops.concat([x, h_prev], 1)
-
-  # w_grad = tf.sparse.sparse_dense_matmul(sparse_dicfo, xh)
-  # w_grad = math_ops.matmul(xh, unsparse_dicfo, transpose_a=True, b_is_sparse=True)
 
   w_grad = math_ops.matmul(xh, dicfo, transpose_a=True)
   w_grad.get_shape().merge_with(w.get_shape())

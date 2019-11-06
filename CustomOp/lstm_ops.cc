@@ -366,11 +366,11 @@ void LSTMBlockCellBpropWithEigen(
 
   if(sparse_bprop)
   {
-    const float PERCENTAGE = 0.10;
-    make_sparse(di, PERCENTAGE);
-    make_sparse(dci, PERCENTAGE);
-    make_sparse(df, PERCENTAGE);
-    make_sparse(do_, PERCENTAGE);
+    // const float PERCENTAGE = 0.10;
+    // make_sparse(di, PERCENTAGE);
+    // make_sparse(dci, PERCENTAGE);
+    // make_sparse(df, PERCENTAGE);
+    // make_sparse(do_, PERCENTAGE);
 
     // g_log << "Sparse bprop\n";
   }
