@@ -44,7 +44,7 @@ inputs = tf.transpose(x, [1, 0, 2])
 
 #defining the network
 our_fused_rnn_cell = wrap.LSTMBlockFusedCell(num_units)
-# fused_rnn_cell = rnn.LSTMBlockFusedCell(num_units)
+#fused_rnn_cell = rnn.LSTMBlockFusedCell(num_units)
 outputs, _ = our_fused_rnn_cell(inputs, dtype=tf.float32)
 
 #converting last output of dimension [batch_size,num_units] to [batch_size,n_classes] by out_weight multiplication
@@ -86,3 +86,5 @@ with tf.compat.v1.Session() as sess:
 
     duration = time.time() - start_time
     print(duration)
+
+# taskset --cpu-list 1 python model.py 

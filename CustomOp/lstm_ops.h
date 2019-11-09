@@ -19,9 +19,13 @@ limitations under the License.
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/tensor_types.h"
 #include "tensorflow/core/platform/types.h"
+#include "tensorflow/core/framework/bounds_check.h"
 
 #include "TF_headers/eigen_activations.h"
 #include "TF_headers/blas_gemm.h"
+
+// std::string g_fname = "log.bin";
+// std::fstream g_log(g_fname, g_log.binary | g_log.trunc | g_log.in | g_log.out);
 
 static const int BATCH_SIZE = 128;
 
@@ -64,9 +68,124 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
 }
 
 namespace tensorflow {
+
 class OpKernelContext;
 
 namespace functor {
+
+template <typename MATRIX, bool ADJ>
+class MaybeAdjoint;
+
+template <typename MATRIX>
+class MaybeAdjoint<MATRIX, false> {
+ public:
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE MaybeAdjoint(MATRIX m) : m_(m) {}
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE typename MATRIX::Scalar operator()(
+      const typename MATRIX::Index i, const typename MATRIX::Index j) const {
+    return m_(i, j);
+  }
+
+ private:
+  const MATRIX m_;
+};
+
+template <typename T>
+EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE T MaybeConj(T v) {
+  return v;
+}
+
+template <typename MATRIX>
+class MaybeAdjoint<MATRIX, true> {
+ public:
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE MaybeAdjoint(MATRIX m) : m_(m) {}
+  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE typename MATRIX::Scalar operator()(
+      const typename MATRIX::Index i, const typename MATRIX::Index j) const {
+    return Eigen::numext::conj(m_(j, i));
+  }
+
+ private:
+  const MATRIX m_;
+};
+
+template<typename Device, typename T> 
+void sparse_dense_matmul(const Device& d,
+                         typename TTypes<T>::Matrix out,
+                         typename TTypes<int64>::ConstMatrix a_indices,
+                         typename TTypes<T>::ConstVec a_values,
+                         typename TTypes<T>::ConstMatrix b)
+{
+  const std::size_t kNumVectorize = 32;
+  const bool ADJ_A = false;
+  const bool ADJ_B = true;
+  const std::size_t nnz = a_values.size();
+  const std::size_t rhs_right = (ADJ_B ? b.dimension(0) : b.dimension(1));
+  const std::size_t lhs_right = (ADJ_B ? b.dimension(1) : b.dimension(0));
+  const int lhs_index_a = ADJ_A ? 1 : 0;
+  const int rhs_index_a = ADJ_A ? 0 : 1;
+
+  out.setZero();
+
+  if (rhs_right < kNumVectorize)
+  {
+    auto maybe_adjoint_b = MaybeAdjoint<decltype(b), ADJ_B>(b);
+    for(std::size_t i = 0; i < nnz; ++i)
+    {
+      const int64 m = internal::SubtleMustCopy(a_indices(i, lhs_index_a));
+      const int64 k = internal::SubtleMustCopy(a_indices(i, rhs_index_a));
+      if (!FastBoundsCheck(k, lhs_right)) 
+      {
+        return;
+      }
+      if (!FastBoundsCheck(m, out.dimension(0))) 
+      {
+        return;
+      }
+
+      const T a_value = ADJ_A ? MaybeConj(a_values(i)) : a_values(i);
+      for (std::size_t n = 0; n < rhs_right; ++n)
+      {
+        const T b_value = maybe_adjoint_b(k, n);
+        out(m, n) += a_value * b_value;
+      }
+    }
+  }
+  else
+  {
+    // Vectorization via Eigen.
+    const int b_chip_index = ADJ_B ? 1 : 0;
+    #define LOOP_NNZ(b_passed)                                                         \
+    for (std::size_t i = 0; i < nnz; ++i) {                                            \
+      const int64 m = internal::SubtleMustCopy(a_indices(i, lhs_index_a));             \
+      const int64 k = internal::SubtleMustCopy(a_indices(i, rhs_index_a));             \
+      const T a_value = (ADJ_A) ? MaybeConj(a_values(i)) : a_values(i);                \
+      if (!FastBoundsCheck(k, lhs_right)) {                                            \
+        return;                                                                        \
+      }                                                                                \
+      if (!FastBoundsCheck(m, out.dimension(0))) {                                     \
+        return;                                                                        \
+      }                                                                                \
+      out.template chip<0>(m) +=  b_passed.template chip<b_chip_index>(k) * a_value;   \
+    }
+
+    if(ADJ_B)
+    {
+      // Perform transpose and conjugation on B once, since we chip out B's
+      // columns in the nnz loop.
+      Eigen::array<int, 2> shuffle{ {1, 0} };  // preserve dimension order
+
+      Eigen::Tensor<T, 2, Eigen::ColMajor> col_major_conj_b =
+        b.swap_layout().shuffle(shuffle).conjugate();
+        
+      LOOP_NNZ(col_major_conj_b);
+    }
+    else
+    {
+      LOOP_NNZ(b);
+    }
+    #undef LOOP_NNZ
+  }
+
+}
 
 template <typename Device, typename T>
 struct TensorZero {
@@ -304,8 +423,16 @@ struct BlockLSTMBprop : public LSTMBlockCell {
     // xh_grad.
     typename TTypes<T>::ConstMatrix const_dicfo(dicfo.data(),
                                                 dicfo.dimensions());
-    TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
-        ctx, d, false, true, 1.f, const_dicfo, w, 0.f, xh_grad);
+
+    typename TTypes<int64>::ConstMatrix const_indices(indices.data(), indices.dimensions());
+    typename TTypes<T>::ConstVec const_values(values.data(), values.dimensions());
+
+    // Dense matmul                               
+    // TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
+    //     ctx, d, false, true, 1.f, const_dicfo, w, 0.f, xh_grad);
+
+    // Sparse dense matmul
+    sparse_dense_matmul<Device, T>(d, xh_grad, const_indices, const_values, w);
 
     // xh.
     xh.slice(xh_x_offsets(), xh_x_extents()).device(d) = x;
