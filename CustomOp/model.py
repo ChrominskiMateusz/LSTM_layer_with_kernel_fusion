@@ -2,8 +2,9 @@
 # https://jasdeep06.github.io/posts/Understanding-LSTM-in-Tensorflow-MNIST/
 
 import tensorflow as tf
+import time as time
 
-#import wrapper as wrap
+import wrapper as wrap
 from tensorflow.contrib import rnn
 import numpy as np
 
@@ -42,8 +43,9 @@ y=tf.compat.v1.placeholder("float",[None,n_classes])
 inputs = tf.transpose(x, [1, 0, 2])
 
 #defining the network
-fused_rnn_cell = rnn.LSTMBlockFusedCell(num_units)
-outputs, _ = fused_rnn_cell(inputs, dtype=tf.float32)
+our_fused_rnn_cell = wrap.LSTMBlockFusedCell(num_units)
+# fused_rnn_cell = rnn.LSTMBlockFusedCell(num_units)
+outputs, _ = our_fused_rnn_cell(inputs, dtype=tf.float32)
 
 #converting last output of dimension [batch_size,num_units] to [batch_size,n_classes] by out_weight multiplication
 prediction = tf.matmul(outputs[-1], out_weights) + out_bias
