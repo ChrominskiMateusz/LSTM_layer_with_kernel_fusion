@@ -17,10 +17,51 @@ limitations under the License.
 #define TENSORFLOW_CONTRIB_RNN_KERNELS_LSTM_OPS_H_
 
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
-#include "TF_headers/blas_gemm.h"
 #include "tensorflow/core/framework/tensor_types.h"
-#include "TF_headers/eigen_activations.h"
 #include "tensorflow/core/platform/types.h"
+
+#include "TF_headers/eigen_activations.h"
+#include "TF_headers/blas_gemm.h"
+
+static const int BATCH_SIZE = 128;
+
+template<typename T>
+void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, 
+                  const int group_size, 
+                  const int start, 
+                  const int end,
+                  Eigen::TensorMap<Eigen::Tensor<long long, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> indices,
+                  Eigen::TensorMap<Eigen::Tensor<T, 1, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> values,
+                  const int part)
+{
+  int max;
+  int counter{part * BATCH_SIZE * BATCH_SIZE / 2 / group_size};
+  
+  int offset{part % 2 ? part - 1 : part};
+  offset *= BATCH_SIZE / 2;
+  
+  int end_ = start ? BATCH_SIZE : BATCH_SIZE / 2;
+
+  for (int i{}; i < BATCH_SIZE; i++)
+    for (int j{start ? BATCH_SIZE / 2 : start}; j + group_size <= end_; j += group_size)
+    {
+      max = 0;
+    
+      for (int k{1}; k < group_size; k++)
+        if (fabs (float (matrix(i, j + max))) < fabs (float (matrix(i, j + k))))
+          max = k;
+
+      for (int k{}; k < group_size; k++)
+        if (k != max)
+          matrix(i, j + k) = (T)NULL;
+
+      values(counter) = matrix(i, j + max);
+      indices(counter, 0) = i;
+      indices(counter, 1) = j + max + offset;
+
+      counter++;
+    }
+}
 
 namespace tensorflow {
 class OpKernelContext;
@@ -196,7 +237,9 @@ struct BlockLSTMBprop : public LSTMBlockCell {
       typename TTypes<T>::Matrix xh_grad, typename TTypes<T>::Matrix x_grad,
       typename TTypes<T>::Matrix w_grad, typename TTypes<T>::Vec wci_grad,
       typename TTypes<T>::Vec wcf_grad, typename TTypes<T>::Vec wco_grad,
-      typename TTypes<T>::Vec b_grad) {
+      typename TTypes<T>::Vec b_grad,
+      typename TTypes<T>::Vec values,
+      typename TTypes<int64>::Matrix indices) {
     // do[t] = sigm'(o[t]) .* dh[t] .* co[t]
     do_.device(d) = o * (o.constant(T(1)) - o) * h_grad * co;
 
@@ -219,9 +262,35 @@ struct BlockLSTMBprop : public LSTMBlockCell {
     // di[t] = sigm'(i[t]) dcs[t] ci[t]
     di.device(d) = i * (i.constant(T(1)) - i) * dcs * ci;
 
+    const int START = 0;
+    const int GROUP_SIZE = 16;
+
+    std::thread di_thread (&make_sparse<T>, di, GROUP_SIZE, START, di.size () / 2, indices, values, 0);
+    std::thread di_thread2 (&make_sparse<T>, di, GROUP_SIZE, di.size () / 2, di.size (), indices, values, 1);
+
+    std::thread dci_thread (&make_sparse<T>, dci, GROUP_SIZE, START, dci.size () / 2, indices, values, 2);
+    std::thread dci_thread2 (&make_sparse<T>, dci, GROUP_SIZE, dci.size () / 2, dci.size (), indices, values, 3);
+
+    std::thread df_thread (&make_sparse<T>, df, GROUP_SIZE, START, df.size () / 2, indices, values, 4);
+    std::thread df_thread2 (&make_sparse<T>, df, GROUP_SIZE, df.size () / 2, df.size (), indices, values, 5);
+    
+    std::thread do__thread (&make_sparse<T>, do_, GROUP_SIZE, START, do_.size () / 2, indices, values, 6);
+    std::thread do__thread2 (&make_sparse<T>, do_, GROUP_SIZE, do_.size () / 2, do_.size (), indices, values, 7);
+
+    di_thread.join ();
+    di_thread2.join ();
     dicfo.slice(icfo_i_offsets(), cell_extents()).device(d) = di;
+
+    dci_thread.join ();
+    dci_thread2.join ();
     dicfo.slice(icfo_c_offsets(), cell_extents()).device(d) = dci;
+
+    df_thread.join ();
+    df_thread2.join ();
     dicfo.slice(icfo_f_offsets(), cell_extents()).device(d) = df;
+
+    do__thread.join ();
+    do__thread2.join ();
     dicfo.slice(icfo_o_offsets(), cell_extents()).device(d) = do_;
 
     cs_prev_grad.device(d) = dcs * f;

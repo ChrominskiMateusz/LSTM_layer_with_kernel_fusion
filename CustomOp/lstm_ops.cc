@@ -373,7 +373,7 @@ class BlockLSTMOp : public OpKernel {
 
   void Compute(OpKernelContext* ctx) override {
 
-    std::cout << "Forward prop lstm_ops.cc line=376\n";
+    //std::cout << "Forward prop lstm_ops.cc line=376\n";
 
     const Tensor* seq_len_max_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("seq_len_max", &seq_len_max_tensor));
@@ -570,7 +570,7 @@ class BlockLSTMGradOp : public OpKernel {
 
   void Compute(OpKernelContext* ctx) override {
 
-    std::cout << "Back prop lstm_ops.cc line=573\n";
+    //std::cout << "Back prop lstm_ops.cc line=573\n";
 
     const Tensor* seq_len_max_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("seq_len_max", &seq_len_max_tensor));
@@ -712,6 +712,19 @@ class BlockLSTMGradOp : public OpKernel {
                                       TensorShape({batch_size, cell_size * 4}),
                                       &dicfo_tensor));
 
+    // Our temp tensors
+    Tensor values_tensor;
+    OP_REQUIRES_OK(ctx,
+                   ctx->allocate_temp(DataTypeToEnum<T>::v(),
+                                      TensorShape({elements_left}),
+                                      &values_tensor));
+
+    Tensor indices_tensor;
+    OP_REQUIRES_OK(ctx,
+                   ctx->allocate_temp(DataTypeToEnum<int64>::v(),
+                                      TensorShape({elements_left, 2}),
+                                      &indices_tensor));
+
     Tensor cs_grad_tensor;
     OP_REQUIRES_OK(ctx, ctx->allocate_temp(DataTypeToEnum<T>::v(),
                                            batch_cell_shape, &cs_grad_tensor));
@@ -721,6 +734,9 @@ class BlockLSTMGradOp : public OpKernel {
                                            batch_cell_shape, &h_grad_tensor));
 
     const Device& device = ctx->eigen_device<Device>();
+
+    functor::TensorZero<Device, T>()(device, values_tensor.flat<T>());
+    functor::TensorZero<Device, int64>()(device, indices_tensor.flat<int64>());
 
     functor::TensorZero<Device, T>()(device, cs_grad_tensor.flat<T>());
     functor::TensorZero<Device, T>()(device, cs_prev_grad_tensor->flat<T>());
@@ -782,7 +798,9 @@ class BlockLSTMGradOp : public OpKernel {
           h_prev_grad_tensor->matrix<T>(), xh_grad_tensor.matrix<T>(),
           x_grad_tensor.matrix<T>(), w_grad_tensor->matrix<T>(),
           wci_grad_tensor->vec<T>(), wcf_grad_tensor->vec<T>(),
-          wco_grad_tensor->vec<T>(), b_grad_tensor->vec<T>());
+          wco_grad_tensor->vec<T>(), b_grad_tensor->vec<T>(),
+          values_tensor.vec<T>(), indices_tensor.matrix<int64>());
+
       slicer.FinishTimeStep();
     }
 
@@ -795,6 +813,7 @@ class BlockLSTMGradOp : public OpKernel {
 
  private:
   bool use_peephole_;
+  const int elements_left = 4096;
 };
 
 #define REGISTER_KERNEL(T)                                             \
