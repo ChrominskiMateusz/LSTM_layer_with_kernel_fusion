@@ -27,8 +27,6 @@ limitations under the License.
 // std::string g_fname = "log.bin";
 // std::fstream g_log(g_fname, g_log.binary | g_log.trunc | g_log.in | g_log.out);
 
-static const int BATCH_SIZE = 128;
-
 template<typename T>
 void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, 
                   const int group_size, 
@@ -38,16 +36,20 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
                   Eigen::TensorMap<Eigen::Tensor<T, 1, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> values,
                   const int part)
 {
-  int max;
-  int counter{part * BATCH_SIZE * BATCH_SIZE / 2 / group_size};
+  const int split_offset = matrix.size() % group_size;
+
+  const int x_ = matrix.dimension(0);
+  const int y_ = matrix.dimension(1);
+  
+  int counter{part * x_ * y_ / 2 / group_size};
+  const int end_ = start ? y_ : y_ / 2;
   
   int offset{part % 2 ? part - 1 : part};
-  offset *= BATCH_SIZE / 2;
+  offset *= y_ / 2;
   
-  int end_ = start ? BATCH_SIZE : BATCH_SIZE / 2;
-
-  for (int i{}; i < BATCH_SIZE; i++)
-    for (int j{start ? BATCH_SIZE / 2 : start}; j + group_size <= end_; j += group_size)
+  int max;
+  for (int i{}; i < x_; i++)
+    for (int j{start ? y_ / 2 + split_offset : start}; j + group_size <= end_; j += group_size)
     {
       max = 0;
     
@@ -65,6 +67,13 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
 
       counter++;
     }
+  
+  if (split_offset)
+  {
+    values(counter) = matrix(x_ - 1, end_ - 1);
+    indices(counter, 0) = x_ - 1;
+    indices(counter, 1) = end_ - 1 + offset;
+  }  
 }
 
 namespace tensorflow {
@@ -429,7 +438,7 @@ struct BlockLSTMBprop : public LSTMBlockCell {
 
     // Dense matmul                               
     // TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
-    //     ctx, d, false, true, 1.f, const_dicfo, w, 0.f, xh_grad);
+    //    ctx, d, false, true, 1.f, const_dicfo, w, 0.f, xh_grad);
 
     // Sparse dense matmul
     sparse_dense_matmul<Device, T>(d, xh_grad, const_indices, const_values, w);
