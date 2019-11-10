@@ -342,8 +342,9 @@ struct LSTMBlockCellFprop : public LSTMBlockCell {
 template <typename Device, typename T, bool USE_CUBLAS>
 struct BlockLSTMBprop : public LSTMBlockCell {
   BlockLSTMBprop(const int batch_size, const int input_size,
-                 const int cell_size)
-      : LSTMBlockCell(batch_size, input_size, cell_size) {}
+                 const int cell_size, const int group_size)
+      : LSTMBlockCell(batch_size, input_size, cell_size),
+      group_size (group_size) {}
 
   void operator()(
       OpKernelContext* ctx, const Device& d, bool use_peephole,
@@ -391,19 +392,18 @@ struct BlockLSTMBprop : public LSTMBlockCell {
     di.device(d) = i * (i.constant(T(1)) - i) * dcs * ci;
 
     const int START = 0;
-    const int GROUP_SIZE = 16;
 
-    std::thread di_thread (&make_sparse<T>, di, GROUP_SIZE, START, di.size () / 2, indices, values, 0);
-    std::thread di_thread2 (&make_sparse<T>, di, GROUP_SIZE, di.size () / 2, di.size (), indices, values, 1);
+    std::thread di_thread (&make_sparse<T>, di, group_size, START, di.size () / 2, indices, values, 0);
+    std::thread di_thread2 (&make_sparse<T>, di, group_size, di.size () / 2, di.size (), indices, values, 1);
 
-    std::thread dci_thread (&make_sparse<T>, dci, GROUP_SIZE, START, dci.size () / 2, indices, values, 2);
-    std::thread dci_thread2 (&make_sparse<T>, dci, GROUP_SIZE, dci.size () / 2, dci.size (), indices, values, 3);
+    std::thread dci_thread (&make_sparse<T>, dci, group_size, START, dci.size () / 2, indices, values, 2);
+    std::thread dci_thread2 (&make_sparse<T>, dci, group_size, dci.size () / 2, dci.size (), indices, values, 3);
 
-    std::thread df_thread (&make_sparse<T>, df, GROUP_SIZE, START, df.size () / 2, indices, values, 4);
-    std::thread df_thread2 (&make_sparse<T>, df, GROUP_SIZE, df.size () / 2, df.size (), indices, values, 5);
+    std::thread df_thread (&make_sparse<T>, df, group_size, START, df.size () / 2, indices, values, 4);
+    std::thread df_thread2 (&make_sparse<T>, df, group_size, df.size () / 2, df.size (), indices, values, 5);
     
-    std::thread do__thread (&make_sparse<T>, do_, GROUP_SIZE, START, do_.size () / 2, indices, values, 6);
-    std::thread do__thread2 (&make_sparse<T>, do_, GROUP_SIZE, do_.size () / 2, do_.size (), indices, values, 7);
+    std::thread do__thread (&make_sparse<T>, do_, group_size, START, do_.size () / 2, indices, values, 6);
+    std::thread do__thread2 (&make_sparse<T>, do_, group_size, do_.size () / 2, do_.size (), indices, values, 7);
 
     di_thread.join ();
     di_thread2.join ();
@@ -437,11 +437,11 @@ struct BlockLSTMBprop : public LSTMBlockCell {
     typename TTypes<T>::ConstVec const_values(values.data(), values.dimensions());
 
     // Dense matmul                               
-    // TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
-    //    ctx, d, false, true, 1.f, const_dicfo, w, 0.f, xh_grad);
+     TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
+        ctx, d, false, true, 1.f, const_dicfo, w, 0.f, xh_grad);
 
     // Sparse dense matmul
-    sparse_dense_matmul<Device, T>(d, xh_grad, const_indices, const_values, w);
+    //sparse_dense_matmul<Device, T>(d, xh_grad, const_indices, const_values, w);
 
     // xh.
     xh.slice(xh_x_offsets(), xh_x_extents()).device(d) = x;
@@ -465,6 +465,8 @@ struct BlockLSTMBprop : public LSTMBlockCell {
       wco_grad.device(d) += (do_ * cs).sum(Eigen::array<int, 1>({0}));
     }
   }
+  private:
+  const int group_size;
 };
 
 }  // namespace functor

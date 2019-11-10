@@ -572,6 +572,7 @@ class BlockLSTMGradOp : public OpKernel {
     const int64 timelen = x->dim_size(0);
     const int64 batch_size = x->dim_size(1);
     const int64 input_size = x->dim_size(2);
+    const int64 group_size = 16;
 
     const Tensor* cs_prev_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("cs_prev", &cs_prev_tensor));
@@ -704,16 +705,19 @@ class BlockLSTMGradOp : public OpKernel {
                                       &dicfo_tensor));
 
     // Our temp tensors
+    int64 elems = batch_size * cell_size * 4 / group_size;
+    elems += elems % group_size ? 1 : 0;
+
     Tensor values_tensor;
     OP_REQUIRES_OK(ctx,
                    ctx->allocate_temp(DataTypeToEnum<T>::v(),
-                                      TensorShape({elements_left}),
+                                      TensorShape({elems}),
                                       &values_tensor));
 
     Tensor indices_tensor;
     OP_REQUIRES_OK(ctx,
                    ctx->allocate_temp(DataTypeToEnum<int64>::v(),
-                                      TensorShape({elements_left, 2}),
+                                      TensorShape({elems, 2}),
                                       &indices_tensor));
 
     Tensor cs_grad_tensor;
@@ -775,7 +779,7 @@ class BlockLSTMGradOp : public OpKernel {
 
       Tensor x_grad_tensor = slicer.OutputSlice(x_grad, t, "x_grad");
       functor::BlockLSTMBprop<Device, T, USE_CUBLAS>(batch_size, input_size,
-                                                     cell_size)(
+                                                     cell_size, group_size)(
           ctx, device, use_peephole_, x_tensor.matrix<T>(),
           cs_prev_tensor2.matrix<T>(), h_prev_tensor2.matrix<T>(),
           w_tensor->matrix<T>(), wci_tensor->vec<T>(), wcf_tensor->vec<T>(),
@@ -804,7 +808,6 @@ class BlockLSTMGradOp : public OpKernel {
 
  private:
   bool use_peephole_;
-  const int elements_left = 4096;
 };
 
 #define REGISTER_KERNEL(T)                                             \
