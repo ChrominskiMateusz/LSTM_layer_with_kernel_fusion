@@ -120,7 +120,7 @@ class MaybeAdjoint<MATRIX, true> {
 };
 
 template<typename Device, typename T> 
-void sparse_dense_matmul(const Device& d,
+EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE void sparse_dense_matmul(const Device& d,
                          typename TTypes<T>::Matrix out,
                          typename TTypes<int64>::ConstMatrix a_indices,
                          typename TTypes<T>::ConstVec a_values,

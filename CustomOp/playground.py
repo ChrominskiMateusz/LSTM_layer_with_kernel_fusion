@@ -4,20 +4,17 @@ from tensorflow.python.client import timeline
 
 sess = tf.InteractiveSession()
 
-# num_units = 128
-# batch_size = 128 * 100
-# input_size = 28
-
-a = [50000, 50000]
-b = [25, 50000]
+num_units = 128
+batch_size = 128
+input_size = 28
 
 # Init with floats from 0 to 1
-x = tf.random_uniform(a, minval=0, maxval=1, dtype=tf.float32)                # icfo A
-y = tf.random_uniform(b, minval=0, maxval=1, dtype=tf.float32)   # w    B
+x = tf.random_uniform([batch_size, num_units * 4], minval=0, maxval=1, dtype=tf.float32)                # icfo A
+y = tf.random_uniform([batch_size + input_size, num_units * 4], minval=0, maxval=1, dtype=tf.float32)   # w    B
 y_t = tf.transpose(y)                                                                                   # transpose w
 
 # k - number of largest elements that will remain in each row
-k = 500
+k = num_units * 4 // 16 
 values, indices = tf.nn.top_k(x, k, sorted=False)
 values = tf.reshape(values, [-1])
 
