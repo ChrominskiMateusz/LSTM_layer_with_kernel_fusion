@@ -28,6 +28,20 @@ limitations under the License.
 // std::fstream g_log(g_fname, g_log.binary | g_log.trunc | g_log.in | g_log.out);
 
 template<typename T>
+void add_to_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, 
+                  int& counter, 
+                  const int x_, 
+                  const int y_,
+                  Eigen::TensorMap<Eigen::Tensor<long long, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> indices,
+                  Eigen::TensorMap<Eigen::Tensor<T, 1, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> values)
+{
+  values(counter) = matrix(x_, y_);
+  indices(counter, 0) = x_;
+  indices(counter, 1) = y_;
+  counter++;
+}
+
+template<typename T>
 void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, 
                   const int group_size, 
                   const int start, 
@@ -36,7 +50,7 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
                   Eigen::TensorMap<Eigen::Tensor<T, 1, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> values,
                   const int part)
 {
-  const int split_offset = matrix.size() % group_size;
+  int split_offset = start ? (group_size - (matrix.size() / 2) % group_size) % group_size : start;
 
   const int x_ = matrix.dimension(0);
   const int y_ = matrix.dimension(1);
@@ -48,8 +62,14 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
   offset *= y_ / 2;
   
   int max;
+  int j;
+
   for (int i{}; i < x_; i++)
-    for (int j{start ? y_ / 2 + split_offset : start}; j + group_size <= end_; j += group_size)
+  {
+    j = start ? y_ / 2: start;
+    j += split_offset;
+
+    for (; j + group_size <= end_; j += group_size)
     {
       max = 0;
     
@@ -61,19 +81,13 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
         if (k != max)
           matrix(i, j + k) = (T)NULL;
 
-      values(counter) = matrix(i, j + max);
-      indices(counter, 0) = i;
-      indices(counter, 1) = j + max + offset;
-
-      counter++;
+      add_to_sparse(matrix, counter, i, j + max + offset, indices, values);
     }
-  
-  if (split_offset)
-  {
-    values(counter) = matrix(x_ - 1, end_ - 1);
-    indices(counter, 0) = x_ - 1;
-    indices(counter, 1) = end_ - 1 + offset;
-  }  
+    
+    split_offset = (j - end_ == group_size) ? 0 : j - end_;
+    if (split_offset)
+      add_to_sparse(matrix, counter, i, end_ - 1 + offset, indices, values);
+  }
 }
 
 namespace tensorflow {

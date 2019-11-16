@@ -706,7 +706,7 @@ class BlockLSTMGradOp : public OpKernel {
 
     // Our temp tensors
     int64 elems = batch_size * cell_size * 4 / group_size;
-    elems += elems % group_size ? 1 : 0;
+    elems += (elems % group_size) ? 1 : 0;
 
     Tensor values_tensor;
     OP_REQUIRES_OK(ctx,
