@@ -24,6 +24,9 @@ limitations under the License.
 #include "TF_headers/eigen_activations.h"
 #include "TF_headers/blas_gemm.h"
 
+#include <iostream>
+#include <chrono>
+
 // std::string g_fname = "log.bin";
 // std::fstream g_log(g_fname, g_log.binary | g_log.trunc | g_log.in | g_log.out);
 
@@ -392,7 +395,7 @@ struct BlockLSTMBprop : public LSTMBlockCell {
     di.device(d) = i * (i.constant(T(1)) - i) * dcs * ci;
 
     const int START = 0;
-
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
     std::thread di_thread (&make_sparse<T>, di, group_size, START, di.size () / 2, indices, values, 0);
     std::thread di_thread2 (&make_sparse<T>, di, group_size, di.size () / 2, di.size (), indices, values, 1);
 
@@ -420,6 +423,8 @@ struct BlockLSTMBprop : public LSTMBlockCell {
     do__thread.join ();
     do__thread2.join ();
     dicfo.slice(icfo_o_offsets(), cell_extents()).device(d) = do_;
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+    std::cout << "Top - k = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;
 
     cs_prev_grad.device(d) = dcs * f;
     if (use_peephole) {
@@ -436,12 +441,19 @@ struct BlockLSTMBprop : public LSTMBlockCell {
     typename TTypes<int64>::ConstMatrix const_indices(indices.data(), indices.dimensions());
     typename TTypes<T>::ConstVec const_values(values.data(), values.dimensions());
 
+    begin = std::chrono::steady_clock::now();
     // Dense matmul                               
      TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
         ctx, d, false, true, 1.f, const_dicfo, w, 0.f, xh_grad);
 
+    end = std::chrono::steady_clock::now();
+    std::cout << "Dense Matmul = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;
+
+    begin = std::chrono::steady_clock::now();
     // Sparse dense matmul
-    //sparse_dense_matmul<Device, T>(d, xh_grad, const_indices, const_values, w);
+    sparse_dense_matmul<Device, T>(d, xh_grad, const_indices, const_values, w);
+    end = std::chrono::steady_clock::now();
+    std::cout << "Sparse Matmul = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;
 
     // xh.
     xh.slice(xh_x_offsets(), xh_x_extents()).device(d) = x;

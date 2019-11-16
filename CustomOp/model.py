@@ -67,7 +67,7 @@ with tf.compat.v1.Session() as sess:
     iter=1
 
     start_time = time.time()
-    while iter<1000:
+    while iter<2:
         batch_x,batch_y = mnist.train.next_batch(batch_size=batch_size)
 
         batch_x = batch_x.reshape((batch_size, time_steps, input_size))
