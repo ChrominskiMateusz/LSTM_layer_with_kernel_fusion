@@ -62,6 +62,7 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
   part - index of function used to fill indices/values
   thread_count - how many threads in use for this matrix
   */
+
   const int x_ = matrix.dimension(0);
   const int y_ = matrix.dimension(1);
 
@@ -78,9 +79,7 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
 
   for (int i{}; i < x_; i++)
   {
-    j = start + split_offset;
-
-    for (; j + group_size <= end_; j += group_size)
+    for (j = start + split_offset; j + group_size <= end_; j += group_size)
     {
       max = 0;
     
@@ -141,7 +140,7 @@ class MaybeAdjoint<MATRIX, true> {
   const MATRIX m_;
 };
 
-template<typename Device, typename T> 
+template<typename Device, typename T, bool ADJ_A, bool ADJ_B> 
 void sparse_dense_matmul(const Device& d,
                          typename TTypes<T>::Matrix out,
                          typename TTypes<int64>::ConstMatrix a_indices,
@@ -149,8 +148,6 @@ void sparse_dense_matmul(const Device& d,
                          typename TTypes<T>::ConstMatrix b)
 {
   const std::size_t kNumVectorize = 32;
-  const bool ADJ_A = false;
-  const bool ADJ_B = true;
   const std::size_t nnz = a_values.size();
   const std::size_t rhs_right = (ADJ_B ? b.dimension(0) : b.dimension(1));
   const std::size_t lhs_right = (ADJ_B ? b.dimension(1) : b.dimension(0));
@@ -468,7 +465,7 @@ struct BlockLSTMBprop : public LSTMBlockCell {
     //    ctx, d, false, true, 1.f, const_dicfo, w, 0.f, xh_grad);
 
     // Sparse dense matmul
-    sparse_dense_matmul<Device, T>(d, xh_grad, const_indices, const_values, w);
+    sparse_dense_matmul<Device, T, false, true>(d, xh_grad, const_indices, const_values, w);
 
     // xh.
     xh.slice(xh_x_offsets(), xh_x_extents()).device(d) = x;
@@ -489,11 +486,11 @@ struct BlockLSTMBprop : public LSTMBlockCell {
     typename TTypes<T>::ConstVec const_svalues(svalues.data(), svalues.dimensions());
 
     // w_grad.
-    TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
-        ctx, d, true, false, 1.f, const_xh, const_dicfo, 1.f, w_grad);
+    // TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
+    //     ctx, d, true, false, 1.f, const_xh, const_dicfo, 1.f, w_grad);
 
     // Sparse dense matmul
-    // sparse_dense_matmul<Device, T>(d, w_grad, const_sindices, const_svalues, const_dicfo);
+    sparse_dense_matmul<Device, T, true, false>(d, w_grad, const_sindices, const_svalues, const_dicfo);
 
     // b_grad.
     b_grad.device(d) += dicfo.sum(Eigen::array<int, 1>({0}));

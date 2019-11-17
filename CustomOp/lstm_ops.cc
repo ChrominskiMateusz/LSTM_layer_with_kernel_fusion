@@ -720,8 +720,9 @@ class BlockLSTMGradOp : public OpKernel {
                                       TensorShape({elems, 2}),
                                       &indices_tensor));
 
-    int64 el = batch_size * (input_size + cell_size);
-
+    int64 el = batch_size * (input_size + cell_size) / group_size;
+    el += el/10;
+    
     Tensor svalues_tensor;
     OP_REQUIRES_OK(ctx,
                    ctx->allocate_temp(DataTypeToEnum<T>::v(),
