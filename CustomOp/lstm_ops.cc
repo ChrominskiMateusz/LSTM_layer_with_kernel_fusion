@@ -373,8 +373,6 @@ class BlockLSTMOp : public OpKernel {
 
   void Compute(OpKernelContext* ctx) override {
 
-    std::cout << "Forward prop lstm_ops.cc line=376\n";
-
     const Tensor* seq_len_max_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("seq_len_max", &seq_len_max_tensor));
 
@@ -569,8 +567,6 @@ class BlockLSTMGradOp : public OpKernel {
   }
 
   void Compute(OpKernelContext* ctx) override {
-
-    std::cout << "Back prop lstm_ops.cc line=573\n";
 
     const Tensor* seq_len_max_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("seq_len_max", &seq_len_max_tensor));
