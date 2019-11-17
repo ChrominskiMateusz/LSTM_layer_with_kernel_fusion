@@ -177,7 +177,8 @@ void sparse_dense_matmul(const Device& d,
                          typename TTypes<T>::Matrix out,
                          typename TTypes<int64>::ConstMatrix a_indices,
                          typename TTypes<T>::ConstVec a_values,
-                         typename TTypes<T>::ConstMatrix b)
+                         typename TTypes<T>::ConstMatrix b,
+                         const bool zeroingOut)
 {
   const std::size_t kNumVectorize = 32;
   const std::size_t nnz = a_values.size();
@@ -186,7 +187,8 @@ void sparse_dense_matmul(const Device& d,
   const int lhs_index_a = ADJ_A ? 1 : 0;
   const int rhs_index_a = ADJ_A ? 0 : 1;
 
-  out.setZero();
+  if(zeroingOut)
+    out.setZero();
 
   if (rhs_right < kNumVectorize)
   {
@@ -451,7 +453,7 @@ struct BlockLSTMBprop : public LSTMBlockCell {
     // di[t] = sigm'(i[t]) dcs[t] ci[t]
     di.device(d) = i * (i.constant(T(1)) - i) * dcs * ci;
 
-    dicfo.slice(icfo_i_offsets(), cell_extents()).device(d) = di;;
+    dicfo.slice(icfo_i_offsets(), cell_extents()).device(d) = di;
     dicfo.slice(icfo_c_offsets(), cell_extents()).device(d) = dci;
     dicfo.slice(icfo_f_offsets(), cell_extents()).device(d) = df;
     dicfo.slice(icfo_o_offsets(), cell_extents()).device(d) = do_;
@@ -469,9 +471,10 @@ struct BlockLSTMBprop : public LSTMBlockCell {
           df * wcf.reshape(p_shape).broadcast(p_broadcast_shape);
     }
 
+    one_thread_sparse(dicfo, indices, values, group_size);
+
     // xh_grad.
-    typename TTypes<T>::ConstMatrix const_dicfo(dicfo.data(),
-                                                dicfo.dimensions());
+    typename TTypes<T>::ConstMatrix const_dicfo(dicfo.data(), dicfo.dimensions());
 
     typename TTypes<int64>::ConstMatrix const_indices(indices.data(), indices.dimensions());
     typename TTypes<T>::ConstVec const_values(values.data(), values.dimensions());
@@ -485,7 +488,7 @@ struct BlockLSTMBprop : public LSTMBlockCell {
 
     begin = std::chrono::steady_clock::now();
     // Sparse dense matmul
-    sparse_dense_matmul<Device, T, false, true>(d, xh_grad, const_indices, const_values, w);
+    sparse_dense_matmul<Device, T, false, true>(d, xh_grad, const_indices, const_values, w, true);
     end = std::chrono::steady_clock::now();
     std::cout << "First sparse matmul = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]" << std::endl;
     
@@ -517,7 +520,7 @@ struct BlockLSTMBprop : public LSTMBlockCell {
 
     begin = std::chrono::steady_clock::now();
     // Sparse dense matmul
-    sparse_dense_matmul<Device, T, true, false>(d, w_grad, const_sindices, const_svalues, const_dicfo);
+    sparse_dense_matmul<Device, T, true, false>(d, w_grad, const_sindices, const_svalues, const_dicfo, false);
     end = std::chrono::steady_clock::now();
     std::cout << "Second sparse matmul = " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << "[µs]\n\n";
 
