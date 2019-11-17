@@ -24,13 +24,6 @@ limitations under the License.
 #include "TF_headers/eigen_activations.h"
 #include "TF_headers/blas_gemm.h"
 
-// #include <iostream>
-// #include <fstream>
-// #include <chrono>
-
-// std::string g_fname = "log.bin";
-// std::fstream g_log(g_fname, g_log.binary | g_log.trunc | g_log.in | g_log.out);
-
 template<typename T>
 void add_to_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, 
                   int& counter, 
@@ -184,7 +177,8 @@ void sparse_dense_matmul(const Device& d,
                          typename TTypes<T>::Matrix out,
                          typename TTypes<int64>::ConstMatrix a_indices,
                          typename TTypes<T>::ConstVec a_values,
-                         typename TTypes<T>::ConstMatrix b)
+                         typename TTypes<T>::ConstMatrix b,
+                         const bool zeroingOut)
 {
   const std::size_t kNumVectorize = 32;
   const std::size_t nnz = a_values.size();
@@ -193,7 +187,8 @@ void sparse_dense_matmul(const Device& d,
   const int lhs_index_a = ADJ_A ? 1 : 0;
   const int rhs_index_a = ADJ_A ? 0 : 1;
 
-  out.setZero();
+  if(zeroingOut)
+    out.setZero();
 
   if (rhs_right < kNumVectorize)
   {
@@ -458,34 +453,9 @@ struct BlockLSTMBprop : public LSTMBlockCell {
     // di[t] = sigm'(i[t]) dcs[t] ci[t]
     di.device(d) = i * (i.constant(T(1)) - i) * dcs * ci;
 
-    const int START = 0;
-
-    // std::thread di_thread (&make_sparse<T>, di, group_size, START, di.dimension(1) / 2, indices, values, 0, 2);
-    // std::thread di_thread2 (&make_sparse<T>, di, group_size, di.dimension(1) / 2, di.dimension(1), indices, values, 1, 2);
-
-    // std::thread dci_thread (&make_sparse<T>, dci, group_size, START, dci.dimension(1) / 2, indices, values, 2, 2);
-    // std::thread dci_thread2 (&make_sparse<T>, dci, group_size, dci.dimension(1) / 2, dci.dimension(1), indices, values, 3, 2);
-
-    // std::thread df_thread (&make_sparse<T>, df, group_size, START, df.dimension(1) / 2, indices, values, 4, 2);
-    // std::thread df_thread2 (&make_sparse<T>, df, group_size, df.dimension(1) / 2, df.dimension(1), indices, values, 5, 2);
-    
-    // std::thread do__thread (&make_sparse<T>, do_, group_size, START, do_.dimension(1) / 2, indices, values, 6, 2);
-    // std::thread do__thread2 (&make_sparse<T>, do_, group_size, do_.dimension(1) / 2, do_.dimension(1), indices, values, 7, 2);
-
-    // di_thread.join ();
-    // di_thread2.join ();
     dicfo.slice(icfo_i_offsets(), cell_extents()).device(d) = di;
-
-    // dci_thread.join ();
-    // dci_thread2.join ();
     dicfo.slice(icfo_c_offsets(), cell_extents()).device(d) = dci;
-
-    // df_thread.join ();
-    // df_thread2.join ();
     dicfo.slice(icfo_f_offsets(), cell_extents()).device(d) = df;
-
-    // do__thread.join ();
-    // do__thread2.join ();
     dicfo.slice(icfo_o_offsets(), cell_extents()).device(d) = do_;
 
     cs_prev_grad.device(d) = dcs * f;
@@ -496,29 +466,27 @@ struct BlockLSTMBprop : public LSTMBlockCell {
           df * wcf.reshape(p_shape).broadcast(p_broadcast_shape);
     }
 
-    // xh_grad.
-    typename TTypes<T>::ConstMatrix const_dicfo(dicfo.data(),
-                                                dicfo.dimensions());
+    one_thread_sparse(dicfo, indices, values, group_size);
 
-    // typename TTypes<int64>::ConstMatrix const_indices(indices.data(), indices.dimensions());
-    // typename TTypes<T>::ConstVec const_values(values.data(), values.dimensions());
+    // xh_grad.
+    typename TTypes<T>::ConstMatrix const_dicfo(dicfo.data(), dicfo.dimensions());
+
+    typename TTypes<int64>::ConstMatrix const_indices(indices.data(), indices.dimensions());
+    typename TTypes<T>::ConstVec const_values(values.data(), values.dimensions());
 
     // Dense matmul                               
-    TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
-       ctx, d, false, true, 1.f, const_dicfo, w, 0.f, xh_grad);
+    // TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
+    //    ctx, d, false, true, 1.f, const_dicfo, w, 0.f, xh_grad);
 
     // Sparse dense matmul
-    //sparse_dense_matmul<Device, T, false, true>(d, xh_grad, const_indices, const_values, w);
+    sparse_dense_matmul<Device, T, false, true>(d, xh_grad, const_indices, const_values, w, true);
 
     // xh.
     xh.slice(xh_x_offsets(), xh_x_extents()).device(d) = x;
     xh.slice(xh_h_offsets(), xh_h_extents()).device(d) = h_prev;
 
-    std::thread xh_thread (&make_sparse<T>, xh, group_size, START, xh.dimension(1) / 2, sindices, svalues, 0, 2);
-    std::thread xh_thread2 (&make_sparse<T>, xh, group_size, xh.dimension(1) / 2, xh.dimension(1), sindices, svalues, 1, 2);
+    one_thread_sparse(xh, sindices, svalues, group_size);
 
-    xh_thread.join();
-    xh_thread2.join();
     typename TTypes<T>::ConstMatrix const_xh(xh.data(), xh.dimensions());
 
     // x_grad.
@@ -533,7 +501,7 @@ struct BlockLSTMBprop : public LSTMBlockCell {
     //     ctx, d, true, false, 1.f, const_xh, const_dicfo, 1.f, w_grad);
 
     // Sparse dense matmul
-    sparse_dense_matmul<Device, T, true, false>(d, w_grad, const_sindices, const_svalues, const_dicfo);
+    sparse_dense_matmul<Device, T, true, false>(d, w_grad, const_sindices, const_svalues, const_dicfo, false);
 
     // b_grad.
     b_grad.device(d) += dicfo.sum(Eigen::array<int, 1>({0}));

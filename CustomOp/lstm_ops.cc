@@ -572,7 +572,7 @@ class BlockLSTMGradOp : public OpKernel {
     const int64 timelen = x->dim_size(0);
     const int64 batch_size = x->dim_size(1);
     const int64 input_size = x->dim_size(2);
-    const int64 group_size = 16;
+    const int64 group_size = 128;
 
     const Tensor* cs_prev_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("cs_prev", &cs_prev_tensor));
