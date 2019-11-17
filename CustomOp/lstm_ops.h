@@ -169,10 +169,12 @@ void sparse_dense_matmul(const Device& d,
       const int64 k = internal::SubtleMustCopy(a_indices(i, rhs_index_a));
       if (!FastBoundsCheck(k, lhs_right)) 
       {
+        throw "Sparse Matmul dimensions not match";
         return;
       }
       if (!FastBoundsCheck(m, out.dimension(0))) 
       {
+        throw "Sparse Matmul dimensions not match";
         return;
       }
 
@@ -194,9 +196,11 @@ void sparse_dense_matmul(const Device& d,
       const int64 k = internal::SubtleMustCopy(a_indices(i, rhs_index_a));             \
       const T a_value = (ADJ_A) ? MaybeConj(a_values(i)) : a_values(i);                \
       if (!FastBoundsCheck(k, lhs_right)) {                                            \
+        throw "Sparse Matmul dimensions not match";                                    \
         return;                                                                        \
       }                                                                                \
       if (!FastBoundsCheck(m, out.dimension(0))) {                                     \
+        throw "Sparse Matmul dimensions not match";                                    \
         return;                                                                        \
       }                                                                                \
       out.template chip<0>(m) +=  b_passed.template chip<b_chip_index>(k) * a_value;   \
