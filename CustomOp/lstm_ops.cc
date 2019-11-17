@@ -720,6 +720,20 @@ class BlockLSTMGradOp : public OpKernel {
                                       TensorShape({elems, 2}),
                                       &indices_tensor));
 
+    int64 el = batch_size * (input_size + cell_size);
+
+    Tensor svalues_tensor;
+    OP_REQUIRES_OK(ctx,
+                   ctx->allocate_temp(DataTypeToEnum<T>::v(),
+                                      TensorShape({el}),
+                                      &svalues_tensor));
+
+    Tensor sindices_tensor;
+    OP_REQUIRES_OK(ctx,
+                   ctx->allocate_temp(DataTypeToEnum<int64>::v(),
+                                      TensorShape({el, 2}),
+                                      &sindices_tensor));
+
     Tensor cs_grad_tensor;
     OP_REQUIRES_OK(ctx, ctx->allocate_temp(DataTypeToEnum<T>::v(),
                                            batch_cell_shape, &cs_grad_tensor));
@@ -732,6 +746,9 @@ class BlockLSTMGradOp : public OpKernel {
 
     functor::TensorZero<Device, T>()(device, values_tensor.flat<T>());
     functor::TensorZero<Device, int64>()(device, indices_tensor.flat<int64>());
+
+    functor::TensorZero<Device, T>()(device, svalues_tensor.flat<T>());
+    functor::TensorZero<Device, int64>()(device, sindices_tensor.flat<int64>());
 
     functor::TensorZero<Device, T>()(device, cs_grad_tensor.flat<T>());
     functor::TensorZero<Device, T>()(device, cs_prev_grad_tensor->flat<T>());
@@ -794,7 +811,8 @@ class BlockLSTMGradOp : public OpKernel {
           x_grad_tensor.matrix<T>(), w_grad_tensor->matrix<T>(),
           wci_grad_tensor->vec<T>(), wcf_grad_tensor->vec<T>(),
           wco_grad_tensor->vec<T>(), b_grad_tensor->vec<T>(),
-          values_tensor.vec<T>(), indices_tensor.matrix<int64>());
+          values_tensor.vec<T>(), indices_tensor.matrix<int64>(),
+          svalues_tensor.vec<T>(), sindices_tensor.matrix<int64>());
 
       slicer.FinishTimeStep();
     }

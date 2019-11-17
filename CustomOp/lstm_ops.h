@@ -31,13 +31,14 @@ template<typename T>
 void add_to_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix, 
                   int& counter, 
                   const int x_, 
-                  const int y_,
+                  const int y_, 
+                  const int offset,
                   Eigen::TensorMap<Eigen::Tensor<long long, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> indices,
                   Eigen::TensorMap<Eigen::Tensor<T, 1, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> values)
 {
   values(counter) = matrix(x_, y_);
   indices(counter, 0) = x_;
-  indices(counter, 1) = y_;
+  indices(counter, 1) = y_ + offset;
   counter++;
 }
 
@@ -48,26 +49,36 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
                   const int end,
                   Eigen::TensorMap<Eigen::Tensor<long long, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> indices,
                   Eigen::TensorMap<Eigen::Tensor<T, 1, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> values,
-                  const int part)
+                  const int part,
+                  const int thread_count)
 {
-  int split_offset = start ? (group_size - (matrix.size() / 2) % group_size) % group_size : start;
-
+  /*
+  matrix - matrix to sparse
+  group_size - size of every group from which we will be choosin' max value
+  start - start of matrix.dimension(1) 
+  end - end of matrix.dimension(1)
+  indices - indices of max elements
+  values - values of max elements
+  part - index of function used to fill indices/values
+  thread_count - how many threads in use for this matrix
+  */
   const int x_ = matrix.dimension(0);
   const int y_ = matrix.dimension(1);
+
+  int split_offset = start ? (group_size - (x_ * start / thread_count) % group_size) % group_size : start;
+
+  int counter{part * x_ * y_ / thread_count / group_size};
+  const int end_ = start + y_ / thread_count;
   
-  int counter{part * x_ * y_ / 2 / group_size};
-  const int end_ = start ? y_ : y_ / 2;
-  
-  int offset{part % 2 ? part - 1 : part};
-  offset *= y_ / 2;
+  int offset{part - part % thread_count};
+  offset *= y_ / thread_count;
   
   int max;
   int j;
 
   for (int i{}; i < x_; i++)
   {
-    j = start ? y_ / 2: start;
-    j += split_offset;
+    j = start + split_offset;
 
     for (; j + group_size <= end_; j += group_size)
     {
@@ -77,16 +88,16 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
         if (fabs (float (matrix(i, j + max))) < fabs (float (matrix(i, j + k))))
           max = k;
 
-      for (int k{}; k < group_size; k++)
-        if (k != max)
-          matrix(i, j + k) = (T)NULL;
+      // for (int k{}; k < group_size; k++)
+      //   if (k != max)
+      //     matrix(i, j + k) = (T)NULL;
 
-      add_to_sparse(matrix, counter, i, j + max + offset, indices, values);
+      add_to_sparse(matrix, counter, i, j + max, offset, indices, values);
     }
     
     split_offset = (j - end_ == group_size) ? 0 : j - end_;
     if (split_offset)
-      add_to_sparse(matrix, counter, i, end_ - 1 + offset, indices, values);
+      add_to_sparse(matrix, counter, i, end_ - 1, offset, indices, values);
   }
 }
 
@@ -382,7 +393,9 @@ struct BlockLSTMBprop : public LSTMBlockCell {
       typename TTypes<T>::Vec wcf_grad, typename TTypes<T>::Vec wco_grad,
       typename TTypes<T>::Vec b_grad,
       typename TTypes<T>::Vec values,
-      typename TTypes<int64>::Matrix indices) {
+      typename TTypes<int64>::Matrix indices,
+      typename TTypes<T>::Vec svalues,
+      typename TTypes<int64>::Matrix sindices) {
     // do[t] = sigm'(o[t]) .* dh[t] .* co[t]
     do_.device(d) = o * (o.constant(T(1)) - o) * h_grad * co;
 
@@ -407,17 +420,17 @@ struct BlockLSTMBprop : public LSTMBlockCell {
 
     const int START = 0;
 
-    std::thread di_thread (&make_sparse<T>, di, group_size, START, di.size () / 2, indices, values, 0);
-    std::thread di_thread2 (&make_sparse<T>, di, group_size, di.size () / 2, di.size (), indices, values, 1);
+    std::thread di_thread (&make_sparse<T>, di, group_size, START, di.dimension(1) / 2, indices, values, 0, 2);
+    std::thread di_thread2 (&make_sparse<T>, di, group_size, di.dimension(1) / 2, di.dimension(1), indices, values, 1, 2);
 
-    std::thread dci_thread (&make_sparse<T>, dci, group_size, START, dci.size () / 2, indices, values, 2);
-    std::thread dci_thread2 (&make_sparse<T>, dci, group_size, dci.size () / 2, dci.size (), indices, values, 3);
+    std::thread dci_thread (&make_sparse<T>, dci, group_size, START, dci.dimension(1) / 2, indices, values, 2, 2);
+    std::thread dci_thread2 (&make_sparse<T>, dci, group_size, dci.dimension(1) / 2, dci.dimension(1), indices, values, 3, 2);
 
-    std::thread df_thread (&make_sparse<T>, df, group_size, START, df.size () / 2, indices, values, 4);
-    std::thread df_thread2 (&make_sparse<T>, df, group_size, df.size () / 2, df.size (), indices, values, 5);
+    std::thread df_thread (&make_sparse<T>, df, group_size, START, df.dimension(1) / 2, indices, values, 4, 2);
+    std::thread df_thread2 (&make_sparse<T>, df, group_size, df.dimension(1) / 2, df.dimension(1), indices, values, 5, 2);
     
-    std::thread do__thread (&make_sparse<T>, do_, group_size, START, do_.size () / 2, indices, values, 6);
-    std::thread do__thread2 (&make_sparse<T>, do_, group_size, do_.size () / 2, do_.size (), indices, values, 7);
+    std::thread do__thread (&make_sparse<T>, do_, group_size, START, do_.dimension(1) / 2, indices, values, 6, 2);
+    std::thread do__thread2 (&make_sparse<T>, do_, group_size, do_.dimension(1) / 2, do_.dimension(1), indices, values, 7, 2);
 
     di_thread.join ();
     di_thread2.join ();
@@ -451,24 +464,36 @@ struct BlockLSTMBprop : public LSTMBlockCell {
     typename TTypes<T>::ConstVec const_values(values.data(), values.dimensions());
 
     // Dense matmul                               
-     TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
-        ctx, d, false, true, 1.f, const_dicfo, w, 0.f, xh_grad);
+    // TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
+    //    ctx, d, false, true, 1.f, const_dicfo, w, 0.f, xh_grad);
 
     // Sparse dense matmul
-    //sparse_dense_matmul<Device, T>(d, xh_grad, const_indices, const_values, w);
+    sparse_dense_matmul<Device, T>(d, xh_grad, const_indices, const_values, w);
 
     // xh.
     xh.slice(xh_x_offsets(), xh_x_extents()).device(d) = x;
     xh.slice(xh_h_offsets(), xh_h_extents()).device(d) = h_prev;
+
+    std::thread xh_thread (&make_sparse<T>, xh, group_size, START, xh.dimension(1) / 2, sindices, svalues, 0, 2);
+    std::thread xh_thread2 (&make_sparse<T>, xh, group_size, xh.dimension(1) / 2, xh.dimension(1), sindices, svalues, 1, 2);
+
+    xh_thread.join();
+    xh_thread2.join();
     typename TTypes<T>::ConstMatrix const_xh(xh.data(), xh.dimensions());
 
     // x_grad.
     x_grad.device(d) = xh_grad.slice(xh_x_offsets(), xh_x_extents());
     h_prev_grad.device(d) = xh_grad.slice(xh_h_offsets(), xh_h_extents());
+    
+    typename TTypes<int64>::ConstMatrix const_sindices(sindices.data(), sindices.dimensions());
+    typename TTypes<T>::ConstVec const_svalues(svalues.data(), svalues.dimensions());
 
     // w_grad.
     TensorBlasGemm<Device, T, USE_CUBLAS>::compute(
         ctx, d, true, false, 1.f, const_xh, const_dicfo, 1.f, w_grad);
+
+    // Sparse dense matmul
+    // sparse_dense_matmul<Device, T>(d, w_grad, const_sindices, const_svalues, const_dicfo);
 
     // b_grad.
     b_grad.device(d) += dicfo.sum(Eigen::array<int, 1>({0}));
