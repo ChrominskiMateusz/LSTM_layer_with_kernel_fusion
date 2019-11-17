@@ -104,6 +104,41 @@ void make_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::D
   }
 }
 
+
+template<typename T>
+void one_thread_sparse (Eigen::TensorMap<Eigen::Tensor<T, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> matrix,
+                  Eigen::TensorMap<Eigen::Tensor<long long, 2, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> indices,
+                  Eigen::TensorMap<Eigen::Tensor<T, 1, Eigen::RowMajor, Eigen::DenseIndex>, Eigen::Aligned> values, 
+                  const int group_size)
+{
+  const int x_ = matrix.dimension(0);
+  const int y_ = matrix.dimension(1);
+
+  int counter{};
+  int split_offset{};
+  int j;
+  int max;
+
+  for (int i{}; i < x_; i++)
+  {
+    for (j = split_offset; j + group_size <= y_; j += group_size)
+    {
+      max = 0;
+    
+      for (int k{1}; k < group_size; k++)
+        if (fabs (float (matrix(i, j + max))) < fabs (float (matrix(i, j + k))))
+          max = k;
+
+      add_to_sparse(matrix, counter, i, j + max, 0, indices, values);
+    }
+    
+    split_offset = (j == y_) ? 0 : j + group_size - y_;
+    if (split_offset)
+      add_to_sparse(matrix, counter, i, y_ - 1, 0, indices, values);
+  }
+}
+
+
 namespace tensorflow {
 
 class OpKernelContext;
