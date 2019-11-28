@@ -63,6 +63,7 @@ def _BlockLSTMGradFusedOur(op, *grad):
        h,
        cs_grad,
        h_grad,
+       group_size_attr=op.get_attr("group_size_attr"),
        use_peephole=op.get_attr("use_peephole"))
 
   return [
@@ -227,6 +228,7 @@ class LSTMBlockFusedCell(LSTMBlockWrapper):
 
   def __init__(self,
                num_units,
+               group_size=16,
                forget_bias=1.0,
                cell_clip=None,
                use_peephole=False,
@@ -255,6 +257,7 @@ class LSTMBlockFusedCell(LSTMBlockWrapper):
     self._forget_bias = forget_bias
     self._cell_clip = cell_clip if cell_clip is not None else -1
     self._use_peephole = use_peephole
+    self._group_size = group_size
 
     # Inputs must be 3-dimensional.
     self.input_spec = base_layer.InputSpec(ndim=3)
@@ -333,6 +336,7 @@ class LSTMBlockFusedCell(LSTMBlockWrapper):
         wcf=wcf,
         wco=wco,
         b=self._bias,
+        group_size_attr=self._group_size,
         forget_bias=self._forget_bias,
         cell_clip=self._cell_clip,
         use_peephole=self._use_peephole)

@@ -53,6 +53,7 @@ REGISTER_OP("BlockLSTMFusedOur")
     .Output("ci: T")
     .Output("co: T")
     .Output("h: T")
+    .Attr("group_size_attr: int = 16")
     .Attr("forget_bias: float = 1.0")
     .Attr("cell_clip: float = 3.0")
     .Attr("use_peephole: bool = false")
@@ -103,6 +104,7 @@ REGISTER_OP("BlockLSTMGradFusedOur")
     .Output("wcf_grad: T")
     .Output("wco_grad: T")
     .Output("b_grad: T")
+    .Attr("group_size_attr: int = 16")
     .Attr("use_peephole: bool")
     .Attr("T: {half, float}")
     .SetShapeFn([](InferenceContext* c) {
@@ -360,11 +362,10 @@ class BlockLSTMOp : public OpKernel {
     OP_REQUIRES_OK(ctx, ctx->GetAttr("forget_bias", &forget_bias_));
     OP_REQUIRES_OK(ctx, ctx->GetAttr("cell_clip", &cell_clip_));
     OP_REQUIRES_OK(ctx, ctx->GetAttr("use_peephole", &use_peephole_));
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("group_size_attr", &group_size_attr_));
   }
 
   void Compute(OpKernelContext* ctx) override {
-
-    //std::cout << "Forward prop lstm_ops.cc line=376\n";
 
     const Tensor* seq_len_max_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("seq_len_max", &seq_len_max_tensor));
@@ -541,6 +542,7 @@ class BlockLSTMOp : public OpKernel {
   float forget_bias_;
   float cell_clip_;
   bool use_peephole_;
+  int group_size_attr_;
 };
 
 #define REGISTER_KERNEL(T)                                         \
@@ -557,11 +559,10 @@ class BlockLSTMGradOp : public OpKernel {
  public:
   explicit BlockLSTMGradOp(OpKernelConstruction* ctx) : OpKernel(ctx) {
     OP_REQUIRES_OK(ctx, ctx->GetAttr("use_peephole", &use_peephole_));
+    OP_REQUIRES_OK(ctx, ctx->GetAttr("group_size_attr", &group_size));
   }
 
   void Compute(OpKernelContext* ctx) override {
-
-    //std::cout << "Back prop lstm_ops.cc line=573\n";
 
     const Tensor* seq_len_max_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("seq_len_max", &seq_len_max_tensor));
@@ -572,7 +573,6 @@ class BlockLSTMGradOp : public OpKernel {
     const int64 timelen = x->dim_size(0);
     const int64 batch_size = x->dim_size(1);
     const int64 input_size = x->dim_size(2);
-    const int64 group_size = 128;
 
     const Tensor* cs_prev_tensor = nullptr;
     OP_REQUIRES_OK(ctx, ctx->input("cs_prev", &cs_prev_tensor));
@@ -827,6 +827,7 @@ class BlockLSTMGradOp : public OpKernel {
 
  private:
   bool use_peephole_;
+  int64 group_size;
 };
 
 #define REGISTER_KERNEL(T)                                             \

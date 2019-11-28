@@ -43,7 +43,7 @@ y=tf.compat.v1.placeholder("float",[None,n_classes])
 inputs = tf.transpose(x, [1, 0, 2])
 
 #defining the network
-our_fused_rnn_cell = wrap.LSTMBlockFusedCell(num_units)
+our_fused_rnn_cell = wrap.LSTMBlockFusedCell(num_units, group_size=128)
 #fused_rnn_cell = rnn.LSTMBlockFusedCell(num_units)
 outputs, _ = our_fused_rnn_cell(inputs, dtype=tf.float32)
 
